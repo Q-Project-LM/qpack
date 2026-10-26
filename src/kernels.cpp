@@ -79,21 +79,26 @@ static inline void unpack_q4(const uint8_t *p, __m256i &lo, __m256i &hi) {
 }
 static void rows_q4(const uint8_t *Q, const uint16_t *S, const int16_t *xq, const float *bs, float *y, int r0, int r1, int cols) {
   const int G = cols / 32;
+  float bsx[1024], comb[1024];   // activation block scale per group, and group scale x block scale (cols <= 32768)
+  for (int k = 0; k < G; k++) bsx[k] = bs[k >> 2];
   for (int r = r0; r < r1; r++) {
     const uint8_t *q = Q + (int64_t)r * (cols / 2); const uint16_t *s = S + (int64_t)r * G;
-    __m256 a0 = _mm256_setzero_ps(), a1 = a0; int k = 0;
+    int k = 0;
+    for (; k + 8 <= G; k += 8) _mm256_storeu_ps(comb + k, _mm256_mul_ps(_mm256_cvtph_ps(_mm_loadu_si128((const __m128i *)(s + k))), _mm256_loadu_ps(bsx + k)));
+    for (; k < G; k++) comb[k] = _cvtsh_ss(s[k]) * bsx[k];
+    __m256 a0 = _mm256_setzero_ps(), a1 = a0; k = 0;
     for (; k + 2 <= G; k += 2) {
       __m256i l0, h0, l1, h1; unpack_q4(q + 16 * k, l0, h0); unpack_q4(q + 16 * k + 16, l1, h1);
       const int16_t *x = xq + 32 * k;
       const __m256i d0 = _mm256_add_epi32(_mm256_madd_epi16(l0, _mm256_loadu_si256((const __m256i *)x)), _mm256_madd_epi16(h0, _mm256_loadu_si256((const __m256i *)(x + 16))));
       const __m256i d1 = _mm256_add_epi32(_mm256_madd_epi16(l1, _mm256_loadu_si256((const __m256i *)(x + 32))), _mm256_madd_epi16(h1, _mm256_loadu_si256((const __m256i *)(x + 48))));
-      a0 = _mm256_fmadd_ps(_mm256_cvtepi32_ps(d0), _mm256_set1_ps(_cvtsh_ss(s[k]) * bs[k >> 2]), a0);
-      a1 = _mm256_fmadd_ps(_mm256_cvtepi32_ps(d1), _mm256_set1_ps(_cvtsh_ss(s[k + 1]) * bs[(k + 1) >> 2]), a1);
+      a0 = _mm256_fmadd_ps(_mm256_cvtepi32_ps(d0), _mm256_broadcast_ss(comb + k), a0);
+      a1 = _mm256_fmadd_ps(_mm256_cvtepi32_ps(d1), _mm256_broadcast_ss(comb + k + 1), a1);
     }
     for (; k < G; k++) {
       __m256i l0, h0; unpack_q4(q + 16 * k, l0, h0); const int16_t *x = xq + 32 * k;
       const __m256i d0 = _mm256_add_epi32(_mm256_madd_epi16(l0, _mm256_loadu_si256((const __m256i *)x)), _mm256_madd_epi16(h0, _mm256_loadu_si256((const __m256i *)(x + 16))));
-      a0 = _mm256_fmadd_ps(_mm256_cvtepi32_ps(d0), _mm256_set1_ps(_cvtsh_ss(s[k]) * bs[k >> 2]), a0);
+      a0 = _mm256_fmadd_ps(_mm256_cvtepi32_ps(d0), _mm256_broadcast_ss(comb + k), a0);
     }
     y[r] = hsum256(_mm256_add_ps(a0, a1));
   }
@@ -115,7 +120,10 @@ static void quant_rows(const float *X, int B, int ldx, int cols, int ldq, int nb
   if ((int64_t)B * cols >= (1 << 15)) pool().parallel_for(B, quant, 1); else quant(0, B);
 }
 
+std::function<void(const Tensor &, const float *, int, int, int)> g_act_hook;
+
 void matvec(const Tensor &W, const float *x, float *y, int rows, int cols) {
+  if (g_act_hook) g_act_hook(W, x, 1, cols, cols);
   const int64_t work = (int64_t)rows * cols;
   const bool par = work >= (1 << 16);
   auto run = [&](const std::function<void(int, int)> &f) { if (par) pool().parallel_for(rows, f, 8); else f(0, rows); };
@@ -199,18 +207,24 @@ static void mm_q8(const int8_t *Q, const float *scale, const int16_t *XQ, const 
 }
 static void mm_q4(const uint8_t *Q, const uint16_t *S, const int16_t *XQ, const float *BS, int ldq, int nb, int B, float *Y, int ldy, int r0, int r1, int cols) {
   const int G = cols / 32;
+  std::vector<float> bsx((size_t)B * G), comb(4 * (size_t)G), sw(G);   // per vector: activation block scale per group
+  for (int b = 0; b < B; b++) for (int k = 0; k < G; k++) bsx[(size_t)b * G + k] = BS[(size_t)b * nb + (k >> 2)];
   for (int r = r0; r < r1; r++) {
     const uint8_t *q = Q + (int64_t)r * (cols / 2); const uint16_t *s = S + (int64_t)r * G;
+    int k = 0;
+    for (; k + 8 <= G; k += 8) _mm256_storeu_ps(sw.data() + k, _mm256_cvtph_ps(_mm_loadu_si128((const __m128i *)(s + k))));
+    for (; k < G; k++) sw[k] = _cvtsh_ss(s[k]);
     int b = 0;
     for (; b + 4 <= B; b += 4) {
       const int16_t *x0 = XQ + (int64_t)b * ldq, *x1 = x0 + ldq, *x2 = x1 + ldq, *x3 = x2 + ldq;
-      const float *s0 = BS + (int64_t)b * nb, *s1 = s0 + nb, *s2 = s1 + nb, *s3 = s2 + nb;
+      for (int j = 0; j < 4; j++) { const float *bj = bsx.data() + (size_t)(b + j) * G; float *cj = comb.data() + (size_t)j * G; for (int kk = 0; kk < G; kk++) cj[kk] = sw[kk] * bj[kk]; }
+      const float *c0 = comb.data(), *c1 = c0 + G, *c2 = c1 + G, *c3 = c2 + G;
       __m256 f0 = _mm256_setzero_ps(), f1 = f0, f2 = f0, f3 = f0;
-      for (int k = 0; k < G; k++) {
-        __m256i lo, hi; unpack_q4(q + 16 * k, lo, hi); const int c = 32 * k, blk = k >> 2; const float sw = _cvtsh_ss(s[k]);
+      for (k = 0; k < G; k++) {
+        __m256i lo, hi; unpack_q4(q + 16 * k, lo, hi); const int c = 32 * k;
 #define QP_Q4DOT(x) _mm256_cvtepi32_ps(_mm256_add_epi32(_mm256_madd_epi16(lo, _mm256_loadu_si256((const __m256i *)((x) + c))), _mm256_madd_epi16(hi, _mm256_loadu_si256((const __m256i *)((x) + c + 16)))))
-        f0 = _mm256_fmadd_ps(QP_Q4DOT(x0), _mm256_set1_ps(sw * s0[blk]), f0); f1 = _mm256_fmadd_ps(QP_Q4DOT(x1), _mm256_set1_ps(sw * s1[blk]), f1);
-        f2 = _mm256_fmadd_ps(QP_Q4DOT(x2), _mm256_set1_ps(sw * s2[blk]), f2); f3 = _mm256_fmadd_ps(QP_Q4DOT(x3), _mm256_set1_ps(sw * s3[blk]), f3);
+        f0 = _mm256_fmadd_ps(QP_Q4DOT(x0), _mm256_broadcast_ss(c0 + k), f0); f1 = _mm256_fmadd_ps(QP_Q4DOT(x1), _mm256_broadcast_ss(c1 + k), f1);
+        f2 = _mm256_fmadd_ps(QP_Q4DOT(x2), _mm256_broadcast_ss(c2 + k), f2); f3 = _mm256_fmadd_ps(QP_Q4DOT(x3), _mm256_broadcast_ss(c3 + k), f3);
 #undef QP_Q4DOT
       }
       Y[(int64_t)b * ldy + r] = hsum256(f0); Y[(int64_t)(b + 1) * ldy + r] = hsum256(f1); Y[(int64_t)(b + 2) * ldy + r] = hsum256(f2); Y[(int64_t)(b + 3) * ldy + r] = hsum256(f3);
@@ -245,6 +259,7 @@ static void mm_float(LoadW loadw, const float *X, int ldx, int B, float *Y, int 
 
 void matmul(const Tensor &W, const float *X, int B, int ldx, float *Y, int ldy, int rows, int cols) {
   if (B == 1) { matvec(W, X, Y, rows, cols); return; }
+  if (g_act_hook) g_act_hook(W, X, B, ldx, cols);
   auto run = [&](const std::function<void(int, int)> &f) { if ((int64_t)rows * cols * B >= (1 << 16)) pool().parallel_for(rows, f, 4); else f(0, rows); };
   switch (W.kind) {
     case Kind::F32: {

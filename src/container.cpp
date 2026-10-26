@@ -44,7 +44,7 @@ Container::Container(const std::string &path) {
     else if (kind == "q8") { t.kind = Kind::Q8; t.data = p; size_t sl; t.scale = (const float *)blob(e["scale"].as_str(), &sl); }
     else if (kind == "q4") {
       t.kind = Kind::Q4; t.data = p; size_t sl; t.scale16 = (const uint16_t *)blob(e["scale"].as_str(), &sl); t.group = (int)e["group"].as_int(32);
-      if (t.group != 32 || t.shape.size() != 2 || t.shape[1] % 32) throw std::runtime_error("q4 tensor " + t.name + ": only group 32 with cols % 32 == 0 is supported");
+      if (t.group != 32 || t.shape.size() != 2 || t.shape[1] % 32 || t.shape[1] > 32768) throw std::runtime_error("q4 tensor " + t.name + ": only group 32 with cols % 32 == 0 and cols <= 32768 is supported");
     }
     else if (kind == "tern5" || kind == "bits") throw std::runtime_error("tensor kind " + kind + " (Q-architecture checkpoints) is not supported by libqpack yet");
     else throw std::runtime_error("unknown tensor kind " + kind);

@@ -79,6 +79,9 @@ void row_f32(const Tensor &W, int64_t r, float *out);       // one row as float 
 // Y[b*ldy + r] = sum_c W[r, c] * X[b*ldx + c] for B input vectors at once (prompt batches): each weight row is read once
 // per batch instead of once per token
 void matmul(const Tensor &W, const float *X, int B, int ldx, float *Y, int ldy, int rows, int cols);
+// optional observer of every matrix product input (B vectors of `cols` floats, stride ldx): calibration statistics for
+// qpack-quantize. Called on the caller's thread before the product; nullptr (default) = off.
+extern std::function<void(const Tensor &W, const float *X, int B, int ldx, int cols)> g_act_hook;
 float dot_f32(const float *a, const float *b, int n);           // AVX2 helpers for attention
 void axpy_f32(float a, const float *x, float *y, int n);      // y += a x
 void to_f16(const float *x, uint16_t *y, int n);                // fp16 KV cache
