@@ -1,0 +1,135 @@
+// Llama-family decoder (Llama, Qwen2, Mistral, SmolLM): RMSNorm, RoPE (rotate-half), GQA, optional q/k/v bias, SwiGLU,
+// tied or untied output head. Tensor names are the canonical ones written by python/qpack/convert_llama.py.
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <stdexcept>
+
+#include "qpack/qpack.h"
+
+namespace qp {
+namespace {
+
+struct Layer { const Tensor *an, *fn, *wq, *wk, *wv, *wo, *bq, *bk, *bv, *wg, *wu, *wd; };
+
+class Llama : public Model {
+ public:
+  Llama(std::shared_ptr<Container> c, int max_ctx) {
+    c_ = c; cfg_ = c->config();
+    d_ = (int)cfg_["hidden_size"].as_int(); L_ = (int)cfg_["num_hidden_layers"].as_int(); nh_ = (int)cfg_["num_attention_heads"].as_int();
+    nkv_ = (int)cfg_["num_key_value_heads"].as_int(); hd_ = (int)cfg_["head_dim"].as_int(d_ / nh_); ff_ = (int)cfg_["intermediate_size"].as_int();
+    V_ = (int)cfg_["vocab_size"].as_int(); eps_ = (float)cfg_["rms_norm_eps"].as_num(1e-6); theta_ = cfg_["rope_theta"].as_num(10000);
+    tie_ = cfg_["tie_embeddings"].as_bool(false);
+    int limit = (int)cfg_["max_position_embeddings"].as_int(1 << 20);
+    ctx_ = max_ctx > 0 ? max_ctx : std::min(4096, limit);
+    embed_ = &c->at("embed"); head_ = tie_ ? embed_ : &c->at("lm_head"); fnorm_ = &c->at("final_norm");
+    for (int l = 0; l < L_; l++) {
+      auto g = [&](const char *n) { return c->get("layers." + std::to_string(l) + "." + n); };
+      Layer ly{g("attn_norm"), g("ffn_norm"), g("wq"), g("wk"), g("wv"), g("wo"), g("bq"), g("bk"), g("bv"), g("w_gate"), g("w_up"), g("w_down")};
+      if (!ly.an || !ly.wq || !ly.wg) throw std::runtime_error("layer " + std::to_string(l) + ": missing tensors");
+      layers_.push_back(ly);
+    }
+    kvd_ = nkv_ * hd_;
+    kc_.assign((size_t)L_ * ctx_ * kvd_, 0.f); vc_.assign((size_t)L_ * ctx_ * kvd_, 0.f);
+    x_.resize(d_); xn_.resize(d_); q_.resize(nh_ * hd_); k_.resize(kvd_); v_.resize(kvd_); att_.resize(nh_ * hd_); o_.resize(d_);
+    g_.resize(ff_); u_.resize(ff_); logits_.resize(V_);
+    inv_.resize(hd_ / 2); for (int i = 0; i < hd_ / 2; i++) inv_[i] = 1.0 / std::pow(theta_, (2.0 * i) / hd_);
+  }
+  int vocab() const override { return V_; }
+  int hidden() const override { return d_; }
+  int max_ctx() const override { return ctx_; }
+  int pos() const override { return pos_; }
+  std::string arch() const override { return "llama:" + cfg_["model_type"].as_str(); }
+  void reset() override { pos_ = 0; }
+  bool rewind(int pos) override { if (pos < 0 || pos > pos_) return false; pos_ = pos; return true; }
+
+  std::vector<uint8_t> snapshot() const override {   // position + the used prefix of the KV cache
+    std::vector<uint8_t> s(4 + 2ull * L_ * pos_ * kvd_ * 4); memcpy(s.data(), &pos_, 4); uint8_t *p = s.data() + 4;
+    for (int l = 0; l < L_; l++) for (const auto *buf : {&kc_, &vc_}) { size_t n = (size_t)pos_ * kvd_ * 4; memcpy(p, buf->data() + (size_t)l * ctx_ * kvd_, n); p += n; }
+    return s;
+  }
+  void restore(const std::vector<uint8_t> &s) override {
+    memcpy(&pos_, s.data(), 4); const uint8_t *p = s.data() + 4;
+    for (int l = 0; l < L_; l++) for (auto *buf : {&kc_, &vc_}) { size_t n = (size_t)pos_ * kvd_ * 4; memcpy(buf->data() + (size_t)l * ctx_ * kvd_, p, n); p += n; }
+  }
+
+  const float *step(int tok, int want) override {
+    if (pos_ >= ctx_) throw std::runtime_error("context window full (" + std::to_string(ctx_) + " tokens)");
+    if (tok < 0 || tok >= V_) throw std::runtime_error("token id out of range");
+    row_f32(*embed_, tok, x_.data());
+    const int half = hd_ / 2, rep = nh_ / nkv_, T = pos_ + 1;
+    std::vector<float> cs(half), sn(half);
+    for (int i = 0; i < half; i++) { double a = pos_ * inv_[i]; cs[i] = (float)std::cos(a); sn[i] = (float)std::sin(a); }
+    auto rope = [&](float *vec) { for (int i = 0; i < half; i++) { float a = vec[i], b = vec[i + half]; vec[i] = a * cs[i] - b * sn[i]; vec[i + half] = b * cs[i] + a * sn[i]; } };
+    const float scl = 1.f / std::sqrt((float)hd_);
+    for (int l = 0; l < L_; l++) {
+      const Layer &ly = layers_[l];
+      rmsnorm(x_.data(), ly.an->f32(), d_, eps_, xn_.data());
+      matvec(*ly.wq, xn_.data(), q_.data(), nh_ * hd_, d_); matvec(*ly.wk, xn_.data(), k_.data(), kvd_, d_); matvec(*ly.wv, xn_.data(), v_.data(), kvd_, d_);
+      if (ly.bq) { for (int i = 0; i < nh_ * hd_; i++) q_[i] += ly.bq->f32()[i]; for (int i = 0; i < kvd_; i++) { k_[i] += ly.bk->f32()[i]; v_[i] += ly.bv->f32()[i]; } }
+      for (int h = 0; h < nh_; h++) rope(q_.data() + h * hd_);
+      for (int g = 0; g < nkv_; g++) rope(k_.data() + g * hd_);
+      float *kl = kc_.data() + (size_t)l * ctx_ * kvd_, *vl = vc_.data() + (size_t)l * ctx_ * kvd_;
+      memcpy(kl + (size_t)pos_ * kvd_, k_.data(), 4 * kvd_); memcpy(vl + (size_t)pos_ * kvd_, v_.data(), 4 * kvd_);
+      auto head = [&](int h0, int h1) {
+        std::vector<float> sc(T);
+        for (int h = h0; h < h1; h++) {
+          const float *qh = q_.data() + h * hd_; const int g = h / rep; float mx = -1e30f;
+          for (int t = 0; t < T; t++) { const float *kk = kl + (size_t)t * kvd_ + g * hd_; float s = 0; for (int i = 0; i < hd_; i++) s += qh[i] * kk[i]; s *= scl; sc[t] = s; mx = std::max(mx, s); }
+          float sum = 0; for (int t = 0; t < T; t++) { sc[t] = std::exp(sc[t] - mx); sum += sc[t]; }
+          float *out = att_.data() + h * hd_; std::fill(out, out + hd_, 0.f); const float inv = 1.f / sum;
+          for (int t = 0; t < T; t++) { const float *vv = vl + (size_t)t * kvd_ + g * hd_; const float w = sc[t] * inv; for (int i = 0; i < hd_; i++) out[i] += w * vv[i]; }
+        }
+      };
+      if ((int64_t)T * nh_ * hd_ > (1 << 15)) pool().parallel_for(nh_, head, 1); else head(0, nh_);
+      matvec(*ly.wo, att_.data(), o_.data(), d_, nh_ * hd_);
+      for (int i = 0; i < d_; i++) x_[i] += o_[i];
+      rmsnorm(x_.data(), ly.fn->f32(), d_, eps_, xn_.data());
+      matvec(*ly.wg, xn_.data(), g_.data(), ff_, d_); matvec(*ly.wu, xn_.data(), u_.data(), ff_, d_);
+      for (int i = 0; i < ff_; i++) g_[i] = g_[i] / (1.f + std::exp(-g_[i])) * u_[i];
+      matvec(*ly.wd, g_.data(), o_.data(), d_, ff_);
+      for (int i = 0; i < d_; i++) x_[i] += o_[i];
+      if (getenv("QPACK_DEBUG")) fprintf(stderr, "pos %d layer %d: %.5f %.5f %.5f %.5f\n", pos_, l, x_[0], x_[1], x_[2], x_[3]);
+    }
+    pos_++;
+    if (!want) return nullptr;
+    rmsnorm(x_.data(), fnorm_->f32(), d_, eps_, xn_.data());
+    if (want == 2) return xn_.data();
+    matvec(*head_, xn_.data(), logits_.data(), V_, d_);
+    return logits_.data();
+  }
+
+ private:
+  int d_, L_, nh_, nkv_, hd_, ff_, V_, ctx_, kvd_, pos_ = 0; float eps_; double theta_; bool tie_;
+  const Tensor *embed_, *head_, *fnorm_; std::vector<Layer> layers_;
+  std::vector<float> kc_, vc_, x_, xn_, q_, k_, v_, att_, o_, g_, u_, logits_; std::vector<double> inv_;
+};
+
+}  // namespace
+
+std::unique_ptr<Model> make_llama(std::shared_ptr<Container> c, int max_ctx) { return std::unique_ptr<Model>(new Llama(c, max_ctx)); }
+
+std::unique_ptr<Model> load_model(const std::string &path, int max_ctx) {
+  auto c = std::make_shared<Container>(path);
+  const std::string arch = c->config()["arch"].as_str(), mt = c->config()["model_type"].as_str();
+  if (arch == "llama") return make_llama(c, max_ctx);
+  if (mt == "nq4") return make_nq(c, max_ctx);
+  throw std::runtime_error("unsupported model in " + path + " (arch='" + arch + "', model_type='" + mt + "')");
+}
+
+SelfTest run_selftest(Model &m, double tol) {
+  SelfTest r; auto &c = m.container();
+  if (!c.has("selftest.json")) return r;
+  const Json st = c.json("selftest.json");   // keep it alive: ranging over a member of a temporary would dangle
+  for (auto &cs : st["cases"].arr) {
+    m.reset(); const float *lg = nullptr; auto &ids = cs["ids"].arr;
+    for (size_t i = 0; i < ids.size(); i++) lg = m.step((int)ids[i].as_int(), i + 1 == ids.size() ? 1 : 0);
+    int best = 0; for (int v = 1; v < m.vocab(); v++) if (lg[v] > lg[best]) best = v;
+    double err = 0; for (size_t k = 0; k < cs["top5"].arr.size(); k++) err = std::max(err, std::fabs(lg[cs["top5"][k].as_int()] - cs["top5_logits"][k].as_num()));
+    r.n++; r.max_err = std::max(r.max_err, err); if (best == cs["top5"][0].as_int() && err < tol) r.ok++;
+  }
+  m.reset(); return r;
+}
+
+}  // namespace qp
