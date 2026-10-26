@@ -54,6 +54,62 @@ class Llama : public Model {
     for (int l = 0; l < L_; l++) for (auto *buf : {&kc_, &vc_}) { size_t n = (size_t)pos_ * kvd_ * 4; memcpy(buf->data() + (size_t)l * ctx_ * kvd_, p, n); p += n; }
   }
 
+  // the prompt in batches of up to PB tokens: every projection is a matrix x matrix product, attention per (token, head)
+  const float *prefill(const int *toks, int n, int want) override {
+    if (n == 1) return step(toks[0], want);
+    if (pos_ + n > ctx_) throw std::runtime_error("context window full (" + std::to_string(ctx_) + " tokens)");
+    const int PB = 64, half = hd_ / 2, rep = nh_ / nkv_, qd = nh_ * hd_; const float scl = 1.f / std::sqrt((float)hd_);
+    bX_.resize((size_t)PB * d_); bXN_.resize((size_t)PB * d_); bQ_.resize((size_t)PB * qd); bK_.resize((size_t)PB * kvd_); bV_.resize((size_t)PB * kvd_);
+    bA_.resize((size_t)PB * qd); bO_.resize((size_t)PB * d_); bG_.resize((size_t)PB * ff_); bU_.resize((size_t)PB * ff_);
+    for (int s0 = 0; s0 < n; s0 += PB) {
+      const int B = std::min(PB, n - s0), p0 = pos_;
+      for (int i = 0; i < B; i++) {
+        if (toks[s0 + i] < 0 || toks[s0 + i] >= V_) throw std::runtime_error("token id out of range");
+        row_f32(*embed_, toks[s0 + i], bX_.data() + (size_t)i * d_);
+      }
+      for (int l = 0; l < L_; l++) {
+        const Layer &ly = layers_[l];
+        pool().parallel_for(B, [&](int a, int b) { for (int i = a; i < b; i++) rmsnorm(bX_.data() + (size_t)i * d_, ly.an->f32(), d_, eps_, bXN_.data() + (size_t)i * d_); }, 4);
+        matmul(*ly.wq, bXN_.data(), B, d_, bQ_.data(), qd, qd, d_); matmul(*ly.wk, bXN_.data(), B, d_, bK_.data(), kvd_, kvd_, d_); matmul(*ly.wv, bXN_.data(), B, d_, bV_.data(), kvd_, kvd_, d_);
+        float *kl = kc_.data() + (size_t)l * ctx_ * kvd_, *vl = vc_.data() + (size_t)l * ctx_ * kvd_;
+        for (int i = 0; i < B; i++) {
+          float *q = bQ_.data() + (size_t)i * qd, *k = bK_.data() + (size_t)i * kvd_, *v = bV_.data() + (size_t)i * kvd_;
+          if (ly.bq) { for (int j = 0; j < qd; j++) q[j] += ly.bq->f32()[j]; for (int j = 0; j < kvd_; j++) { k[j] += ly.bk->f32()[j]; v[j] += ly.bv->f32()[j]; } }
+          float cs[256], sn[256];
+          for (int j = 0; j < half; j++) { double a = (p0 + i) * inv_[j]; cs[j] = (float)std::cos(a); sn[j] = (float)std::sin(a); }
+          auto rope = [&](float *vec) { for (int j = 0; j < half; j++) { float a = vec[j], b = vec[j + half]; vec[j] = a * cs[j] - b * sn[j]; vec[j + half] = b * cs[j] + a * sn[j]; } };
+          for (int h = 0; h < nh_; h++) rope(q + h * hd_);
+          for (int g = 0; g < nkv_; g++) rope(k + g * hd_);
+          memcpy(kl + (size_t)(p0 + i) * kvd_, k, 4 * kvd_); memcpy(vl + (size_t)(p0 + i) * kvd_, v, 4 * kvd_);
+        }
+        pool().parallel_for(B * nh_, [&](int a, int b) {
+          std::vector<float> sc(p0 + B);
+          for (int w = a; w < b; w++) {
+            const int i = w / nh_, h = w % nh_, T = p0 + i + 1, g = h / rep; const float *qh = bQ_.data() + (size_t)i * qd + h * hd_; float mx = -1e30f;
+            for (int t = 0; t < T; t++) { const float *kk = kl + (size_t)t * kvd_ + g * hd_; float s = dot_f32(qh, kk, hd_); s *= scl; sc[t] = s; mx = std::max(mx, s); }
+            float sum = 0; for (int t = 0; t < T; t++) { sc[t] = std::exp(sc[t] - mx); sum += sc[t]; }
+            float *out = bA_.data() + (size_t)i * qd + h * hd_; std::fill(out, out + hd_, 0.f); const float inv = 1.f / sum;
+            for (int t = 0; t < T; t++) { const float *vv = vl + (size_t)t * kvd_ + g * hd_; axpy_f32(sc[t] * inv, vv, out, hd_); }
+          }
+        }, 1);
+        matmul(*ly.wo, bA_.data(), B, qd, bO_.data(), d_, d_, qd);
+        for (size_t j = 0; j < (size_t)B * d_; j++) bX_[j] += bO_[j];
+        pool().parallel_for(B, [&](int a, int b) { for (int i = a; i < b; i++) rmsnorm(bX_.data() + (size_t)i * d_, ly.fn->f32(), d_, eps_, bXN_.data() + (size_t)i * d_); }, 4);
+        matmul(*ly.wg, bXN_.data(), B, d_, bG_.data(), ff_, ff_, d_); matmul(*ly.wu, bXN_.data(), B, d_, bU_.data(), ff_, ff_, d_);
+        pool().parallel_for(B, [&](int a, int b) { for (size_t j = (size_t)a * ff_; j < (size_t)b * ff_; j++) bG_[j] = bG_[j] / (1.f + std::exp(-bG_[j])) * bU_[j]; }, 1);
+        matmul(*ly.wd, bG_.data(), B, ff_, bO_.data(), d_, d_, ff_);
+        for (size_t j = 0; j < (size_t)B * d_; j++) bX_[j] += bO_[j];
+      }
+      pos_ += B;
+    }
+    memcpy(x_.data(), bX_.data() + (size_t)((n - 1) % PB) * d_, 4 * d_);
+    if (!want) return nullptr;
+    rmsnorm(x_.data(), fnorm_->f32(), d_, eps_, xn_.data());
+    if (want == 2) return xn_.data();
+    matvec(*head_, xn_.data(), logits_.data(), V_, d_);
+    return logits_.data();
+  }
+
   const float *step(int tok, int want) override {
     if (pos_ >= ctx_) throw std::runtime_error("context window full (" + std::to_string(ctx_) + " tokens)");
     if (tok < 0 || tok >= V_) throw std::runtime_error("token id out of range");
@@ -76,10 +132,10 @@ class Llama : public Model {
         std::vector<float> sc(T);
         for (int h = h0; h < h1; h++) {
           const float *qh = q_.data() + h * hd_; const int g = h / rep; float mx = -1e30f;
-          for (int t = 0; t < T; t++) { const float *kk = kl + (size_t)t * kvd_ + g * hd_; float s = 0; for (int i = 0; i < hd_; i++) s += qh[i] * kk[i]; s *= scl; sc[t] = s; mx = std::max(mx, s); }
+          for (int t = 0; t < T; t++) { const float *kk = kl + (size_t)t * kvd_ + g * hd_; float s = dot_f32(qh, kk, hd_); s *= scl; sc[t] = s; mx = std::max(mx, s); }
           float sum = 0; for (int t = 0; t < T; t++) { sc[t] = std::exp(sc[t] - mx); sum += sc[t]; }
           float *out = att_.data() + h * hd_; std::fill(out, out + hd_, 0.f); const float inv = 1.f / sum;
-          for (int t = 0; t < T; t++) { const float *vv = vl + (size_t)t * kvd_ + g * hd_; const float w = sc[t] * inv; for (int i = 0; i < hd_; i++) out[i] += w * vv[i]; }
+          for (int t = 0; t < T; t++) { const float *vv = vl + (size_t)t * kvd_ + g * hd_; axpy_f32(sc[t] * inv, vv, out, hd_); }
         }
       };
       if ((int64_t)T * nh_ * hd_ > (1 << 15)) pool().parallel_for(nh_, head, 1); else head(0, nh_);
@@ -104,6 +160,7 @@ class Llama : public Model {
   int d_, L_, nh_, nkv_, hd_, ff_, V_, ctx_, kvd_, pos_ = 0; float eps_; double theta_; bool tie_;
   const Tensor *embed_, *head_, *fnorm_; std::vector<Layer> layers_;
   std::vector<float> kc_, vc_, x_, xn_, q_, k_, v_, att_, o_, g_, u_, logits_; std::vector<double> inv_;
+  std::vector<float> bX_, bXN_, bQ_, bK_, bV_, bA_, bO_, bG_, bU_;   // prompt batch buffers
 };
 
 }  // namespace

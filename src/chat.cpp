@@ -68,7 +68,7 @@ const float *Session::eval(const std::vector<int> &ids, int *reused) {
   }
   if (common == 0 && m_->pos() != 0) m_->reset();
   hist_.assign(ids.begin(), ids.begin() + common); if (reused) *reused = (int)common;
-  for (size_t i = common; i + 1 < ids.size(); i++) { m_->step(ids[i], 0); hist_.push_back(ids[i]); }
+  if (common + 1 < ids.size()) { m_->prefill(ids.data() + common, (int)(ids.size() - 1 - common), 0); hist_.insert(hist_.end(), ids.begin() + common, ids.end() - 1); }
   if (m_->recurrent() && !hist_.empty() && hist_ != snap_ids_) { snap_ = m_->snapshot(); snap_ids_ = hist_; }
   const float *lg = m_->step(ids.back(), 1); hist_.push_back(ids.back());
   return lg;

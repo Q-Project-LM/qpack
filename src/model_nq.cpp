@@ -207,10 +207,10 @@ class NQ : public Model {
       std::vector<float> sc(T), qv(hd);
       for (int h = h0; h < h1; h++) {
         rope_norm(qv.data(), qa_.data() + h * 2 * hd, qn); const int g = h / rep; float mx = -1e30f;
-        for (int t = 0; t < T; t++) { const float *kk = kc + ((size_t)t * nkv + g) * hd; float s = 0; for (int i = 0; i < hd; i++) s += qv[i] * kk[i]; s *= scl; sc[t] = s; mx = std::max(mx, s); }
+        for (int t = 0; t < T; t++) { const float *kk = kc + ((size_t)t * nkv + g) * hd; float s = dot_f32(qv.data(), kk, hd); s *= scl; sc[t] = s; mx = std::max(mx, s); }
         float sum = 0; for (int t = 0; t < T; t++) { sc[t] = std::exp(sc[t] - mx); sum += sc[t]; }
         float *out = ao_.data() + h * hd; std::fill(out, out + hd, 0.f); const float isum = 1.f / sum;
-        for (int t = 0; t < T; t++) { const float *vv = vc + ((size_t)t * nkv + g) * hd; const float w = sc[t] * isum; for (int i = 0; i < hd; i++) out[i] += w * vv[i]; }
+        for (int t = 0; t < T; t++) { const float *vv = vc + ((size_t)t * nkv + g) * hd; axpy_f32(sc[t] * isum, vv, out, hd); }
         for (int i = 0; i < hd; i++) out[i] *= sigm(qa_[h * 2 * hd + hd + i]);
       }
     };

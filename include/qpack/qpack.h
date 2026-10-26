@@ -70,6 +70,11 @@ class Container {
 // y[0..rows) = W x for a 2-D tensor (rows x cols); threaded over rows when the matrix is large enough.
 void matvec(const Tensor &W, const float *x, float *y, int rows, int cols);
 void row_f32(const Tensor &W, int64_t r, float *out);       // one row as float (embedding / table lookups)
+// Y[b*ldy + r] = sum_c W[r, c] * X[b*ldx + c] for B input vectors at once (prompt batches): each weight row is read once
+// per batch instead of once per token
+void matmul(const Tensor &W, const float *X, int B, int ldx, float *Y, int ldy, int rows, int cols);
+float dot_f32(const float *a, const float *b, int n);           // AVX2 helpers for attention
+void axpy_f32(float a, const float *x, float *y, int n);      // y += a x
 void rmsnorm(const float *x, const float *w, int n, float eps, float *out, bool zero_centred = false);
 
 // ------------------------------------------------------------------ models
@@ -82,6 +87,10 @@ class Model {
   virtual int pos() const = 0;
   // one token; want: 0 = update the state only, 1 = return logits (vocab floats), 2 = return the final hidden state
   virtual const float *step(int token, int want = 1) = 0;
+  // n tokens at once (prompt); same result as n step() calls, `want` applies to the last token only
+  virtual const float *prefill(const int *tokens, int n, int want = 1) {
+    const float *r = nullptr; for (int i = 0; i < n; i++) r = step(tokens[i], i + 1 == n ? want : 0); return r;
+  }
   virtual void reset() = 0;
   // drop the state after the first `pos` tokens; false if the model cannot (recurrent state without a snapshot)
   virtual bool rewind(int pos) { return pos == this->pos(); }

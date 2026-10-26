@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "qpack/qpack.h"
 
@@ -30,7 +31,8 @@ int main(int argc, char **argv) {
     double pp = 0, tg = 0;
     for (int r = 0; r < reps; r++) {
       m->reset(); double t0 = now();
-      for (int i = 0; i < np; i++) m->step(100 + (i * 37) % 5000, i + 1 == np ? 1 : 0);
+      std::vector<int> toks(np); for (int i = 0; i < np; i++) toks[i] = 100 + (i * 37) % 5000;
+      m->prefill(toks.data(), np, 1);
       double t1 = now();
       for (int i = 0; i < ng; i++) m->step(100 + (i * 53) % 5000, 1);
       double t2 = now();
