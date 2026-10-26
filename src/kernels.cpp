@@ -69,6 +69,52 @@ static void rows_q8(const int8_t *Q, const float *scale, const int16_t *xq, cons
   }
 }
 
+// q4: 32-column groups, 16 bytes each (byte j = column j in the low nibble, column j + 16 in the high one, stored as
+// q + 8), one fp16 scale per group. Unpacked to int16 and multiplied like q8; the group scale times the activation block
+// scale goes into one float FMA per group.
+static inline void unpack_q4(const uint8_t *p, __m256i &lo, __m256i &hi) {
+  const __m128i b = _mm_loadu_si128((const __m128i *)p), m = _mm_set1_epi8(0x0F), e = _mm_set1_epi8(8);
+  lo = _mm256_cvtepi8_epi16(_mm_sub_epi8(_mm_and_si128(b, m), e));
+  hi = _mm256_cvtepi8_epi16(_mm_sub_epi8(_mm_and_si128(_mm_srli_epi16(b, 4), m), e));
+}
+static void rows_q4(const uint8_t *Q, const uint16_t *S, const int16_t *xq, const float *bs, float *y, int r0, int r1, int cols) {
+  const int G = cols / 32;
+  for (int r = r0; r < r1; r++) {
+    const uint8_t *q = Q + (int64_t)r * (cols / 2); const uint16_t *s = S + (int64_t)r * G;
+    __m256 a0 = _mm256_setzero_ps(), a1 = a0; int k = 0;
+    for (; k + 2 <= G; k += 2) {
+      __m256i l0, h0, l1, h1; unpack_q4(q + 16 * k, l0, h0); unpack_q4(q + 16 * k + 16, l1, h1);
+      const int16_t *x = xq + 32 * k;
+      const __m256i d0 = _mm256_add_epi32(_mm256_madd_epi16(l0, _mm256_loadu_si256((const __m256i *)x)), _mm256_madd_epi16(h0, _mm256_loadu_si256((const __m256i *)(x + 16))));
+      const __m256i d1 = _mm256_add_epi32(_mm256_madd_epi16(l1, _mm256_loadu_si256((const __m256i *)(x + 32))), _mm256_madd_epi16(h1, _mm256_loadu_si256((const __m256i *)(x + 48))));
+      a0 = _mm256_fmadd_ps(_mm256_cvtepi32_ps(d0), _mm256_set1_ps(_cvtsh_ss(s[k]) * bs[k >> 2]), a0);
+      a1 = _mm256_fmadd_ps(_mm256_cvtepi32_ps(d1), _mm256_set1_ps(_cvtsh_ss(s[k + 1]) * bs[(k + 1) >> 2]), a1);
+    }
+    for (; k < G; k++) {
+      __m256i l0, h0; unpack_q4(q + 16 * k, l0, h0); const int16_t *x = xq + 32 * k;
+      const __m256i d0 = _mm256_add_epi32(_mm256_madd_epi16(l0, _mm256_loadu_si256((const __m256i *)x)), _mm256_madd_epi16(h0, _mm256_loadu_si256((const __m256i *)(x + 16))));
+      a0 = _mm256_fmadd_ps(_mm256_cvtepi32_ps(d0), _mm256_set1_ps(_cvtsh_ss(s[k]) * bs[k >> 2]), a0);
+    }
+    y[r] = hsum256(_mm256_add_ps(a0, a1));
+  }
+}
+
+// int16 quantisation of B activation rows (one scale per QB block), rows of ldq entries
+static void quant_rows(const float *X, int B, int ldx, int cols, int ldq, int nb, int16_t *xq, float *bs) {
+  auto quant = [&](int i0, int i1) {
+    for (int i = i0; i < i1; i++) {
+      const float *x = X + (int64_t)i * ldx; int16_t *q = xq + (int64_t)i * ldq; float *s = bs + (int64_t)i * nb;
+      for (int k = 0; k < nb; k++) {
+        const int c0 = k * QB, c1 = std::min(cols, c0 + QB); float mx = 0;
+        for (int c = c0; c < c1; c++) mx = std::max(mx, std::fabs(x[c]));
+        const float isx = mx > 0 ? 32767.f / mx : 0.f; s[k] = mx / 32767.f;
+        for (int c = c0; c < c1; c++) q[c] = (int16_t)lrintf(x[c] * isx);
+      }
+    }
+  };
+  if ((int64_t)B * cols >= (1 << 15)) pool().parallel_for(B, quant, 1); else quant(0, B);
+}
+
 void matvec(const Tensor &W, const float *x, float *y, int rows, int cols) {
   const int64_t work = (int64_t)rows * cols;
   const bool par = work >= (1 << 16);
@@ -76,19 +122,15 @@ void matvec(const Tensor &W, const float *x, float *y, int rows, int cols) {
   switch (W.kind) {
     case Kind::F32: run([&](int a, int b) { rows_f32(W.f32(), x, y, a, b, cols); }); break;
     case Kind::F16: run([&](int a, int b) { rows_f16((const uint16_t *)W.data, x, y, a, b, cols); }); break;
-    case Kind::Q8: {
+    case Kind::Q8: case Kind::Q4: {
       const int nb = (cols + QB - 1) / QB;
       thread_local std::vector<int16_t> xq; thread_local std::vector<float> bs;
       if ((int)xq.size() < cols + 32) xq.resize(cols + 32);
       if ((int)bs.size() < nb) bs.resize(nb);
-      for (int b = 0; b < nb; b++) {
-        const int c0 = b * QB, c1 = std::min(cols, c0 + QB); float mx = 0;
-        for (int c = c0; c < c1; c++) mx = std::max(mx, std::fabs(x[c]));
-        const float isx = mx > 0 ? 32767.f / mx : 0.f; bs[b] = mx / 32767.f;
-        for (int c = c0; c < c1; c++) xq[c] = (int16_t)lrintf(x[c] * isx);
-      }
+      quant_rows(x, 1, cols, cols, cols, nb, xq.data(), bs.data());
       const int16_t *xp = xq.data(); const float *bp = bs.data();
-      run([&](int a, int b) { rows_q8((const int8_t *)W.data, W.scale, xp, bp, y, a, b, cols); });
+      if (W.kind == Kind::Q8) run([&](int a, int b) { rows_q8((const int8_t *)W.data, W.scale, xp, bp, y, a, b, cols); });
+      else run([&](int a, int b) { rows_q4((const uint8_t *)W.data, W.scale16, xp, bp, y, a, b, cols); });
       break;
     }
     default: throw std::runtime_error("matvec: unsupported tensor kind for " + W.name);
@@ -155,6 +197,28 @@ static void mm_q8(const int8_t *Q, const float *scale, const int16_t *XQ, const 
     for (; b < B; b++) rows_q8(Q, scale, XQ + (int64_t)b * ldq, BS + (int64_t)b * nb, Y + (int64_t)b * ldy, r, r + 1, cols);
   }
 }
+static void mm_q4(const uint8_t *Q, const uint16_t *S, const int16_t *XQ, const float *BS, int ldq, int nb, int B, float *Y, int ldy, int r0, int r1, int cols) {
+  const int G = cols / 32;
+  for (int r = r0; r < r1; r++) {
+    const uint8_t *q = Q + (int64_t)r * (cols / 2); const uint16_t *s = S + (int64_t)r * G;
+    int b = 0;
+    for (; b + 4 <= B; b += 4) {
+      const int16_t *x0 = XQ + (int64_t)b * ldq, *x1 = x0 + ldq, *x2 = x1 + ldq, *x3 = x2 + ldq;
+      const float *s0 = BS + (int64_t)b * nb, *s1 = s0 + nb, *s2 = s1 + nb, *s3 = s2 + nb;
+      __m256 f0 = _mm256_setzero_ps(), f1 = f0, f2 = f0, f3 = f0;
+      for (int k = 0; k < G; k++) {
+        __m256i lo, hi; unpack_q4(q + 16 * k, lo, hi); const int c = 32 * k, blk = k >> 2; const float sw = _cvtsh_ss(s[k]);
+#define QP_Q4DOT(x) _mm256_cvtepi32_ps(_mm256_add_epi32(_mm256_madd_epi16(lo, _mm256_loadu_si256((const __m256i *)((x) + c))), _mm256_madd_epi16(hi, _mm256_loadu_si256((const __m256i *)((x) + c + 16)))))
+        f0 = _mm256_fmadd_ps(QP_Q4DOT(x0), _mm256_set1_ps(sw * s0[blk]), f0); f1 = _mm256_fmadd_ps(QP_Q4DOT(x1), _mm256_set1_ps(sw * s1[blk]), f1);
+        f2 = _mm256_fmadd_ps(QP_Q4DOT(x2), _mm256_set1_ps(sw * s2[blk]), f2); f3 = _mm256_fmadd_ps(QP_Q4DOT(x3), _mm256_set1_ps(sw * s3[blk]), f3);
+#undef QP_Q4DOT
+      }
+      Y[(int64_t)b * ldy + r] = hsum256(f0); Y[(int64_t)(b + 1) * ldy + r] = hsum256(f1); Y[(int64_t)(b + 2) * ldy + r] = hsum256(f2); Y[(int64_t)(b + 3) * ldy + r] = hsum256(f3);
+    }
+    for (; b < B; b++) rows_q4(Q, S, XQ + (int64_t)b * ldq, BS + (int64_t)b * nb, Y + (int64_t)b * ldy, r, r + 1, cols);
+  }
+}
+
 template <typename LoadW>
 static void mm_float(LoadW loadw, const float *X, int ldx, int B, float *Y, int ldy, int r0, int r1, int cols, const std::function<float(int, int)> &tail) {
   for (int r = r0; r < r1; r++) {
@@ -195,26 +259,15 @@ void matmul(const Tensor &W, const float *X, int B, int ldx, float *Y, int ldy, 
                                        [&](int r, int c) { return _cvtsh_ss(w[(int64_t)r * cols + c]); }); });
       break;
     }
-    case Kind::Q8: {
+    case Kind::Q8: case Kind::Q4: {
       const int nb = (cols + QB - 1) / QB, ldq = (cols + 31) & ~31;
       thread_local std::vector<int16_t> xq; thread_local std::vector<float> bs;
       if (xq.size() < (size_t)B * ldq) xq.resize((size_t)B * ldq);
       if (bs.size() < (size_t)B * nb) bs.resize((size_t)B * nb);
-      int16_t *xqp = xq.data(); float *bsp = bs.data();
-      auto quant = [&](int i0, int i1) {
-        for (int i = i0; i < i1; i++) {
-          const float *x = X + (int64_t)i * ldx; int16_t *q = xqp + (int64_t)i * ldq; float *s = bsp + (int64_t)i * nb;
-          for (int k = 0; k < nb; k++) {
-            const int c0 = k * QB, c1 = std::min(cols, c0 + QB); float mx = 0;
-            for (int c = c0; c < c1; c++) mx = std::max(mx, std::fabs(x[c]));
-            const float isx = mx > 0 ? 32767.f / mx : 0.f; s[k] = mx / 32767.f;
-            for (int c = c0; c < c1; c++) q[c] = (int16_t)lrintf(x[c] * isx);
-          }
-        }
-      };
-      if ((int64_t)B * cols >= (1 << 15)) pool().parallel_for(B, quant, 1); else quant(0, B);
+      quant_rows(X, B, ldx, cols, ldq, nb, xq.data(), bs.data());
       const int16_t *xp = xq.data(); const float *bp = bs.data();
-      run([&](int a, int b) { mm_q8((const int8_t *)W.data, W.scale, xp, bp, ldq, nb, B, Y, ldy, a, b, cols); });
+      if (W.kind == Kind::Q8) run([&](int a, int b) { mm_q8((const int8_t *)W.data, W.scale, xp, bp, ldq, nb, B, Y, ldy, a, b, cols); });
+      else run([&](int a, int b) { mm_q4((const uint8_t *)W.data, W.scale16, xp, bp, ldq, nb, B, Y, ldy, a, b, cols); });
       break;
     }
     default: for (int i = 0; i < B; i++) matvec(W, X + (int64_t)i * ldx, Y + (int64_t)i * ldy, rows, cols);
@@ -227,6 +280,14 @@ void row_f32(const Tensor &W, int64_t r, float *out) {
     case Kind::F32: memcpy(out, W.f32() + r * n, 4 * n); break;
     case Kind::F16: { const uint16_t *h = (const uint16_t *)W.data + r * n; for (int64_t i = 0; i < n; i++) out[i] = _cvtsh_ss(h[i]); break; }
     case Kind::Q8: { const int8_t *q = (const int8_t *)W.data + r * n; const float s = W.scale[r]; for (int64_t i = 0; i < n; i++) out[i] = q[i] * s; break; }
+    case Kind::Q4: {
+      const uint8_t *q = (const uint8_t *)W.data + r * (n / 2); const uint16_t *s = W.scale16 + r * (n / 32);
+      for (int64_t k = 0; k < n / 32; k++) {
+        const float sc = _cvtsh_ss(s[k]);
+        for (int j = 0; j < 16; j++) { const uint8_t b = q[16 * k + j]; out[32 * k + j] = ((int)(b & 15) - 8) * sc; out[32 * k + j + 16] = ((int)(b >> 4) - 8) * sc; }
+      }
+      break;
+    }
     default: throw std::runtime_error("row_f32: unsupported tensor kind for " + W.name);
   }
 }
@@ -242,6 +303,26 @@ void axpy_f32(float a, const float *x, float *y, int n) {
   const __m256 va = _mm256_set1_ps(a); int i = 0;
   for (; i + 8 <= n; i += 8) _mm256_storeu_ps(y + i, _mm256_fmadd_ps(va, _mm256_loadu_ps(x + i), _mm256_loadu_ps(y + i)));
   for (; i < n; i++) y[i] += a * x[i];
+}
+
+void to_f16(const float *x, uint16_t *y, int n) {
+  int i = 0; for (; i + 8 <= n; i += 8) _mm_storeu_si128((__m128i *)(y + i), _mm256_cvtps_ph(_mm256_loadu_ps(x + i), 0));
+  for (; i < n; i++) y[i] = _cvtss_sh(x[i], 0);
+}
+float dot_f16(const float *a, const uint16_t *b, int n) {
+  __m256 s0 = _mm256_setzero_ps(), s1 = s0; int i = 0;
+  for (; i + 16 <= n; i += 16) {
+    s0 = _mm256_fmadd_ps(_mm256_loadu_ps(a + i), _mm256_cvtph_ps(_mm_loadu_si128((const __m128i *)(b + i))), s0);
+    s1 = _mm256_fmadd_ps(_mm256_loadu_ps(a + i + 8), _mm256_cvtph_ps(_mm_loadu_si128((const __m128i *)(b + i + 8))), s1);
+  }
+  for (; i + 8 <= n; i += 8) s0 = _mm256_fmadd_ps(_mm256_loadu_ps(a + i), _mm256_cvtph_ps(_mm_loadu_si128((const __m128i *)(b + i))), s0);
+  float s = hsum256(_mm256_add_ps(s0, s1)); for (; i < n; i++) s += a[i] * _cvtsh_ss(b[i]);
+  return s;
+}
+void axpy_f16(float a, const uint16_t *x, float *y, int n) {
+  const __m256 va = _mm256_set1_ps(a); int i = 0;
+  for (; i + 8 <= n; i += 8) _mm256_storeu_ps(y + i, _mm256_fmadd_ps(va, _mm256_cvtph_ps(_mm_loadu_si128((const __m128i *)(x + i))), _mm256_loadu_ps(y + i)));
+  for (; i < n; i++) y[i] += a * _cvtsh_ss(x[i]);
 }
 
 void rmsnorm(const float *x, const float *w, int n, float eps, float *out, bool zc) {

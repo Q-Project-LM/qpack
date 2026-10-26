@@ -31,7 +31,7 @@ class Llama : public Model {
       layers_.push_back(ly);
     }
     kvd_ = nkv_ * hd_;
-    kc_.assign((size_t)L_ * ctx_ * kvd_, 0.f); vc_.assign((size_t)L_ * ctx_ * kvd_, 0.f);
+    kc_.assign((size_t)L_ * ctx_ * kvd_, 0); vc_.assign((size_t)L_ * ctx_ * kvd_, 0);   // fp16 K/V cache
     x_.resize(d_); xn_.resize(d_); q_.resize(nh_ * hd_); k_.resize(kvd_); v_.resize(kvd_); att_.resize(nh_ * hd_); o_.resize(d_);
     g_.resize(ff_); u_.resize(ff_); logits_.resize(V_);
     inv_.resize(hd_ / 2); for (int i = 0; i < hd_ / 2; i++) inv_[i] = 1.0 / std::pow(theta_, (2.0 * i) / hd_);
@@ -45,13 +45,13 @@ class Llama : public Model {
   bool rewind(int pos) override { if (pos < 0 || pos > pos_) return false; pos_ = pos; return true; }
 
   std::vector<uint8_t> snapshot() const override {   // position + the used prefix of the KV cache
-    std::vector<uint8_t> s(4 + 2ull * L_ * pos_ * kvd_ * 4); memcpy(s.data(), &pos_, 4); uint8_t *p = s.data() + 4;
-    for (int l = 0; l < L_; l++) for (const auto *buf : {&kc_, &vc_}) { size_t n = (size_t)pos_ * kvd_ * 4; memcpy(p, buf->data() + (size_t)l * ctx_ * kvd_, n); p += n; }
+    std::vector<uint8_t> s(4 + 2ull * L_ * pos_ * kvd_ * 2); memcpy(s.data(), &pos_, 4); uint8_t *p = s.data() + 4;
+    for (int l = 0; l < L_; l++) for (const auto *buf : {&kc_, &vc_}) { size_t n = (size_t)pos_ * kvd_ * 2; memcpy(p, buf->data() + (size_t)l * ctx_ * kvd_, n); p += n; }
     return s;
   }
   void restore(const std::vector<uint8_t> &s) override {
     memcpy(&pos_, s.data(), 4); const uint8_t *p = s.data() + 4;
-    for (int l = 0; l < L_; l++) for (auto *buf : {&kc_, &vc_}) { size_t n = (size_t)pos_ * kvd_ * 4; memcpy(buf->data() + (size_t)l * ctx_ * kvd_, p, n); p += n; }
+    for (int l = 0; l < L_; l++) for (auto *buf : {&kc_, &vc_}) { size_t n = (size_t)pos_ * kvd_ * 2; memcpy(buf->data() + (size_t)l * ctx_ * kvd_, p, n); p += n; }
   }
 
   // the prompt in batches of up to PB tokens: every projection is a matrix x matrix product, attention per (token, head)
@@ -71,7 +71,7 @@ class Llama : public Model {
         const Layer &ly = layers_[l];
         pool().parallel_for(B, [&](int a, int b) { for (int i = a; i < b; i++) rmsnorm(bX_.data() + (size_t)i * d_, ly.an->f32(), d_, eps_, bXN_.data() + (size_t)i * d_); }, 4);
         matmul(*ly.wq, bXN_.data(), B, d_, bQ_.data(), qd, qd, d_); matmul(*ly.wk, bXN_.data(), B, d_, bK_.data(), kvd_, kvd_, d_); matmul(*ly.wv, bXN_.data(), B, d_, bV_.data(), kvd_, kvd_, d_);
-        float *kl = kc_.data() + (size_t)l * ctx_ * kvd_, *vl = vc_.data() + (size_t)l * ctx_ * kvd_;
+        uint16_t *kl = kc_.data() + (size_t)l * ctx_ * kvd_, *vl = vc_.data() + (size_t)l * ctx_ * kvd_;
         for (int i = 0; i < B; i++) {
           float *q = bQ_.data() + (size_t)i * qd, *k = bK_.data() + (size_t)i * kvd_, *v = bV_.data() + (size_t)i * kvd_;
           if (ly.bq) { for (int j = 0; j < qd; j++) q[j] += ly.bq->f32()[j]; for (int j = 0; j < kvd_; j++) { k[j] += ly.bk->f32()[j]; v[j] += ly.bv->f32()[j]; } }
@@ -80,16 +80,16 @@ class Llama : public Model {
           auto rope = [&](float *vec) { for (int j = 0; j < half; j++) { float a = vec[j], b = vec[j + half]; vec[j] = a * cs[j] - b * sn[j]; vec[j + half] = b * cs[j] + a * sn[j]; } };
           for (int h = 0; h < nh_; h++) rope(q + h * hd_);
           for (int g = 0; g < nkv_; g++) rope(k + g * hd_);
-          memcpy(kl + (size_t)(p0 + i) * kvd_, k, 4 * kvd_); memcpy(vl + (size_t)(p0 + i) * kvd_, v, 4 * kvd_);
+          to_f16(k, kl + (size_t)(p0 + i) * kvd_, kvd_); to_f16(v, vl + (size_t)(p0 + i) * kvd_, kvd_);
         }
         pool().parallel_for(B * nh_, [&](int a, int b) {
           std::vector<float> sc(p0 + B);
           for (int w = a; w < b; w++) {
             const int i = w / nh_, h = w % nh_, T = p0 + i + 1, g = h / rep; const float *qh = bQ_.data() + (size_t)i * qd + h * hd_; float mx = -1e30f;
-            for (int t = 0; t < T; t++) { const float *kk = kl + (size_t)t * kvd_ + g * hd_; float s = dot_f32(qh, kk, hd_); s *= scl; sc[t] = s; mx = std::max(mx, s); }
+            for (int t = 0; t < T; t++) { const uint16_t *kk = kl + (size_t)t * kvd_ + g * hd_; float s = dot_f16(qh, kk, hd_); s *= scl; sc[t] = s; mx = std::max(mx, s); }
             float sum = 0; for (int t = 0; t < T; t++) { sc[t] = std::exp(sc[t] - mx); sum += sc[t]; }
             float *out = bA_.data() + (size_t)i * qd + h * hd_; std::fill(out, out + hd_, 0.f); const float inv = 1.f / sum;
-            for (int t = 0; t < T; t++) { const float *vv = vl + (size_t)t * kvd_ + g * hd_; axpy_f32(sc[t] * inv, vv, out, hd_); }
+            for (int t = 0; t < T; t++) { const uint16_t *vv = vl + (size_t)t * kvd_ + g * hd_; axpy_f16(sc[t] * inv, vv, out, hd_); }
           }
         }, 1);
         matmul(*ly.wo, bA_.data(), B, qd, bO_.data(), d_, d_, qd);
@@ -126,16 +126,16 @@ class Llama : public Model {
       if (ly.bq) { for (int i = 0; i < nh_ * hd_; i++) q_[i] += ly.bq->f32()[i]; for (int i = 0; i < kvd_; i++) { k_[i] += ly.bk->f32()[i]; v_[i] += ly.bv->f32()[i]; } }
       for (int h = 0; h < nh_; h++) rope(q_.data() + h * hd_);
       for (int g = 0; g < nkv_; g++) rope(k_.data() + g * hd_);
-      float *kl = kc_.data() + (size_t)l * ctx_ * kvd_, *vl = vc_.data() + (size_t)l * ctx_ * kvd_;
-      memcpy(kl + (size_t)pos_ * kvd_, k_.data(), 4 * kvd_); memcpy(vl + (size_t)pos_ * kvd_, v_.data(), 4 * kvd_);
+      uint16_t *kl = kc_.data() + (size_t)l * ctx_ * kvd_, *vl = vc_.data() + (size_t)l * ctx_ * kvd_;
+      to_f16(k_.data(), kl + (size_t)pos_ * kvd_, kvd_); to_f16(v_.data(), vl + (size_t)pos_ * kvd_, kvd_);
       auto head = [&](int h0, int h1) {
         std::vector<float> sc(T);
         for (int h = h0; h < h1; h++) {
           const float *qh = q_.data() + h * hd_; const int g = h / rep; float mx = -1e30f;
-          for (int t = 0; t < T; t++) { const float *kk = kl + (size_t)t * kvd_ + g * hd_; float s = dot_f32(qh, kk, hd_); s *= scl; sc[t] = s; mx = std::max(mx, s); }
+          for (int t = 0; t < T; t++) { const uint16_t *kk = kl + (size_t)t * kvd_ + g * hd_; float s = dot_f16(qh, kk, hd_); s *= scl; sc[t] = s; mx = std::max(mx, s); }
           float sum = 0; for (int t = 0; t < T; t++) { sc[t] = std::exp(sc[t] - mx); sum += sc[t]; }
           float *out = att_.data() + h * hd_; std::fill(out, out + hd_, 0.f); const float inv = 1.f / sum;
-          for (int t = 0; t < T; t++) { const float *vv = vl + (size_t)t * kvd_ + g * hd_; axpy_f32(sc[t] * inv, vv, out, hd_); }
+          for (int t = 0; t < T; t++) { const uint16_t *vv = vl + (size_t)t * kvd_ + g * hd_; axpy_f16(sc[t] * inv, vv, out, hd_); }
         }
       };
       if ((int64_t)T * nh_ * hd_ > (1 << 15)) pool().parallel_for(nh_, head, 1); else head(0, nh_);
@@ -159,7 +159,8 @@ class Llama : public Model {
  private:
   int d_, L_, nh_, nkv_, hd_, ff_, V_, ctx_, kvd_, pos_ = 0; float eps_; double theta_; bool tie_;
   const Tensor *embed_, *head_, *fnorm_; std::vector<Layer> layers_;
-  std::vector<float> kc_, vc_, x_, xn_, q_, k_, v_, att_, o_, g_, u_, logits_; std::vector<double> inv_;
+  std::vector<uint16_t> kc_, vc_;
+  std::vector<float> x_, xn_, q_, k_, v_, att_, o_, g_, u_, logits_; std::vector<double> inv_;
   std::vector<float> bX_, bXN_, bQ_, bK_, bV_, bA_, bO_, bG_, bU_;   // prompt batch buffers
 };
 

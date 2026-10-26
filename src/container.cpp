@@ -3,6 +3,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <stdexcept>
 
@@ -40,7 +42,10 @@ Container::Container(const std::string &path) {
     else if (kind == "f16") { t.kind = Kind::F16; t.data = p; }
     else if (kind == "i64") { t.kind = Kind::I64; t.data = p; }
     else if (kind == "q8") { t.kind = Kind::Q8; t.data = p; size_t sl; t.scale = (const float *)blob(e["scale"].as_str(), &sl); }
-    else if (kind == "q4") { t.kind = Kind::Q4; t.data = p; size_t sl; t.scale = (const float *)blob(e["scale"].as_str(), &sl); t.group = (int)e["group"].as_int(32); }
+    else if (kind == "q4") {
+      t.kind = Kind::Q4; t.data = p; size_t sl; t.scale16 = (const uint16_t *)blob(e["scale"].as_str(), &sl); t.group = (int)e["group"].as_int(32);
+      if (t.group != 32 || t.shape.size() != 2 || t.shape[1] % 32) throw std::runtime_error("q4 tensor " + t.name + ": only group 32 with cols % 32 == 0 is supported");
+    }
     else if (kind == "tern5" || kind == "bits") throw std::runtime_error("tensor kind " + kind + " (Q-architecture checkpoints) is not supported by libqpack yet");
     else throw std::runtime_error("unknown tensor kind " + kind);
     // small f16 tensors (norms, biases, conv) are converted once so the model code can read them as float
@@ -65,6 +70,30 @@ const uint8_t *Container::blob(const std::string &name, size_t *len) const {
   if (len) *len = it->second.second;
   return map_ + it->second.first;
 }
+std::vector<std::string> Container::blob_names() const {
+  std::vector<std::pair<uint64_t, std::string>> v; for (auto &kv : toc_) v.push_back({kv.second.first, kv.first});
+  std::sort(v.begin(), v.end()); std::vector<std::string> o; for (auto &x : v) o.push_back(x.second); return o;
+}
+
+void write_container(const std::string &path, const std::vector<std::pair<std::string, std::string>> &blobs, bool qpack2) {
+  const uint64_t A = 64; uint64_t off = (16 + 72 * blobs.size() + A - 1) / A * A;
+  std::string head(qpack2 ? "QPACK2\0\0" : "QPACK1\0\0", 8); uint32_t n = (uint32_t)blobs.size(), pad = 0;
+  head.append((const char *)&n, 4); head.append((const char *)&pad, 4);
+  std::vector<uint64_t> offs;
+  for (auto &b : blobs) {
+    if (b.first.size() > 55) throw std::runtime_error("blob name too long: " + b.first);
+    std::string name = b.first; name.resize(56, '\0'); uint64_t len = b.second.size();
+    head += name; head.append((const char *)&off, 8); head.append((const char *)&len, 8);
+    offs.push_back(off); off = (off + len + A - 1) / A * A;
+  }
+  FILE *f = fopen(path.c_str(), "wb"); if (!f) throw std::runtime_error("cannot write " + path);
+  fwrite(head.data(), 1, head.size(), f); uint64_t pos = head.size(); static const char zeros[64] = {};
+  for (size_t i = 0; i < blobs.size(); i++) {
+    fwrite(zeros, 1, offs[i] - pos, f); fwrite(blobs[i].second.data(), 1, blobs[i].second.size(), f); pos = offs[i] + blobs[i].second.size();
+  }
+  if (fclose(f) != 0) throw std::runtime_error("write failed: " + path);
+}
+
 std::string Container::text(const std::string &name) const { size_t n; const uint8_t *p = blob(name, &n); return std::string((const char *)p, n); }
 const Tensor &Container::at(const std::string &name) const { auto *t = get(name); if (!t) throw std::runtime_error("missing tensor " + name); return *t; }
 

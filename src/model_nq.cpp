@@ -119,6 +119,59 @@ class NQ : public Model {
     *score = std::max(-30.f, std::min(30.f, s)); return true;
   }
 
+  // the prompt in batches: every projection is a matrix x matrix product over the batch, the recurrent parts (conv
+  // windows, delta rule, PLE n-gram history) and the attention run token by token inside each layer
+  const float *prefill(const int *toks, int n, int want) override {
+    if (n == 1) return step(toks[0], want);
+    if (pos_ + n > ctx_) throw std::runtime_error("context window full (" + std::to_string(ctx_) + " tokens)");
+    const int PB = 64, D = d_, HC = hc_, HD = HC * D, Cc = 2 * nk_ * dk_ + nv_ * dv_, QK = Cc + nv_ * dv_, ne = (int)p_sizes_.size() * p_hdim_;
+    const int qd2 = 2 * nh_ * hd_, kvd = nkv_ * hd_;
+    auto rs = [&](std::vector<float> &v, size_t m) { if (v.size() < (size_t)PB * m) v.resize((size_t)PB * m); };
+    rs(bH_, HD); rs(bHN_, HD); rs(bLOW_, rank_); rs(bGATE_, HD); rs(bMIX_, D); rs(bINJ_, HC); rs(bY_, D); rs(bE_, ne + 16); rs(bTK_, HD); rs(bPV_, D);
+    rs(bQA_, qd2); rs(bKA_, kvd); rs(bVA_, kvd); rs(bAO_, nh_ * hd_); rs(bQKVZ_, QK); rs(bBA_, 2 * nv_); rs(bO_, nv_ * dv_); rs(bGU_, 2 * ff_); rs(bACT_, ff_);
+    for (int s0 = 0; s0 < n; s0 += PB) {
+      const int B = std::min(PB, n - s0), p0 = pos_;
+      for (int i = 0; i < B; i++) {
+        if (toks[s0 + i] < 0 || toks[s0 + i] >= V_) throw std::runtime_error("token id out of range");
+        row_f32(*embed_, toks[s0 + i], tmp_.data());
+        for (int c = 0; c < HC; c++) memcpy(bH_.data() + (size_t)i * HD + c * D, tmp_.data(), 4 * D);
+      }
+      for (int l = 0; l < L_; l++) {
+        const Layer &ly = layers_[l];
+        if (l == ple_layer_) {
+          for (int i = 0; i < B; i++) ple_gather(toks[s0 + i], bE_.data() + (size_t)i * ne);
+          matmul(*p_key_, bE_.data(), B, ne, bTK_.data(), HD, HD, ne); matmul(*p_val_, bE_.data(), B, ne, bPV_.data(), D, D, ne);
+          for (int i = 0; i < B; i++) ple_mix(bTK_.data() + (size_t)i * HD, bPV_.data() + (size_t)i * D, bH_.data() + (size_t)i * HD);
+        }
+        gres_batch(ly.mix, true, B);
+        if (ly.attn) {
+          matmul(*ly.q, bMIX_.data(), B, D, bQA_.data(), qd2, qd2, D); matmul(*ly.k, bMIX_.data(), B, D, bKA_.data(), kvd, kvd, D); matmul(*ly.v, bMIX_.data(), B, D, bVA_.data(), kvd, kvd, D);
+          for (int i = 0; i < B; i++) attn_kv(ly, bKA_.data() + (size_t)i * kvd, bVA_.data() + (size_t)i * kvd, p0 + i);
+          pool().parallel_for(B * nh_, [&](int a, int b) { for (int w = a; w < b; w++) { const int i = w / nh_, h = w % nh_; attn_heads(ly, bQA_.data() + (size_t)i * qd2, p0 + i, bAO_.data() + (size_t)i * nh_ * hd_, h, h + 1); } }, 1);
+          matmul(*ly.o, bAO_.data(), B, nh_ * hd_, bY_.data(), D, D, nh_ * hd_);
+        } else {
+          matmul(*ly.qkvz, bMIX_.data(), B, D, bQKVZ_.data(), QK, QK, D); matmul(*ly.ba, bMIX_.data(), B, D, bBA_.data(), 2 * nv_, 2 * nv_, D);
+          for (int i = 0; i < B; i++) gdn_core(ly, bQKVZ_.data() + (size_t)i * QK, bBA_.data() + (size_t)i * 2 * nv_, bO_.data() + (size_t)i * nv_ * dv_);
+          matmul(*ly.out, bO_.data(), B, nv_ * dv_, bY_.data(), D, D, nv_ * dv_);
+        }
+        write_batch(B);
+        gres_batch(ly.ffn, true, B);
+        matmul(*ly.gu, bMIX_.data(), B, D, bGU_.data(), 2 * ff_, 2 * ff_, D);
+        for (int i = 0; i < B; i++) { const float *g = bGU_.data() + (size_t)i * 2 * ff_; float *a = bACT_.data() + (size_t)i * ff_; for (int j = 0; j < ff_; j++) a[j] = silu(g[j]) * g[ff_ + j]; }
+        matmul(*ly.down, bACT_.data(), B, ff_, bY_.data(), D, D, ff_);
+        write_batch(B);
+      }
+      if (ple_layer_ < 0) for (int i = 0; i < B; i++) { p2_ = p1_; p1_ = toks[s0 + i]; }
+      pos_ += B;
+      if (s0 + B == n) memcpy(h_.data(), bH_.data() + (size_t)(B - 1) * HD, 4 * HD);
+    }
+    if (!want) return nullptr;
+    gres(fin_, false); memcpy(fin_v_.data(), mixed_.data(), 4 * d_);
+    if (want == 2) return fin_v_.data();
+    matvec(*head_, fin_v_.data(), logits_.data(), V_, d_);
+    return logits_.data();
+  }
+
   const float *step(int tok, int want) override {
     if (pos_ >= ctx_) throw std::runtime_error("context window full (" + std::to_string(ctx_) + " tokens)");
     if (tok < 0 || tok >= V_) throw std::runtime_error("token id out of range");
@@ -158,11 +211,17 @@ class NQ : public Model {
   void write(const float *y) { for (int c = 0; c < hc_; c++) for (int j = 0; j < d_; j++) h_[c * d_ + j] += y[j] * inj_[c]; }
 
   void gdn(const Layer &ly, const float *x) {
-    const int D = d_, nk = nk_, nv = nv_, dk = dk_, dv = dv_, K = K_, kd = nk * dk, Cc = 2 * kd + nv * dv, rep = nv / nk;
-    matvec(*ly.qkvz, x, qkvz_.data(), Cc + nv * dv, D);
-    matvec(*ly.ba, x, ba_.data(), 2 * nv, D);
+    const int D = d_, Cc = 2 * nk_ * dk_ + nv_ * dv_;
+    matvec(*ly.qkvz, x, qkvz_.data(), Cc + nv_ * dv_, D);
+    matvec(*ly.ba, x, ba_.data(), 2 * nv_, D);
+    gdn_core(ly, qkvz_.data(), ba_.data(), o_.data());
+    matvec(*ly.out, o_.data(), y_.data(), D, nv_ * dv_);
+  }
+  // the sequential part of a Gated DeltaNet step: conv window, q/k normalisation, delta-rule recurrence, gated norm
+  void gdn_core(const Layer &ly, const float *qkvz, const float *ba, float *o) {
+    const int nk = nk_, nv = nv_, dk = dk_, dv = dv_, K = K_, kd = nk * dk, Cc = 2 * kd + nv * dv, rep = nv / nk;
     float *win = state_.data() + ly.off_a;
-    memmove(win, win + Cc, 4ull * (K - 1) * Cc); memcpy(win + (size_t)(K - 1) * Cc, qkvz_.data(), 4ull * Cc);
+    memmove(win, win + Cc, 4ull * (K - 1) * Cc); memcpy(win + (size_t)(K - 1) * Cc, qkvz, 4ull * Cc);
     const float *cw = ly.conv->f32();
     for (int ch = 0; ch < Cc; ch++) { float s = 0; for (int j = 0; j < K; j++) s += cw[ch * K + j] * win[(size_t)j * Cc + ch]; xc_[ch] = silu(s); }
     const float scale = 1.f / std::sqrt((float)dk);
@@ -176,66 +235,78 @@ class NQ : public Model {
     for (int vh = 0; vh < nv; vh++) {   // delta rule: S *= g; d = (v - k S) beta; S += k d^T; o = q S
       const float *q = qh_.data() + (vh / rep) * dk, *k = kh_.data() + (vh / rep) * dk, *v = xc_.data() + 2 * kd + vh * dv;
       float *S = Sb + (size_t)vh * dk * dv;
-      const float beta = sigm(ba_[vh]), g = std::exp(-std::exp(Al[vh]) * softplus(ba_[nv + vh] + dtb[vh]));
+      const float beta = sigm(ba[vh]), g = std::exp(-std::exp(Al[vh]) * softplus(ba[nv + vh] + dtb[vh]));
       float kS[512] = {}, ov[512] = {};
       for (int i = 0; i < dk; i++) { float *Sr = S + i * dv; const float ki = k[i]; for (int j = 0; j < dv; j++) { Sr[j] *= g; kS[j] += ki * Sr[j]; } }
       for (int j = 0; j < dv; j++) kS[j] = (v[j] - kS[j]) * beta;
       for (int i = 0; i < dk; i++) { float *Sr = S + i * dv; const float ki = k[i], qi = q[i]; for (int j = 0; j < dv; j++) { Sr[j] += ki * kS[j]; ov[j] += qi * Sr[j]; } }
       float ss = 0; for (int j = 0; j < dv; j++) ss += ov[j] * ov[j];
       const float inv = 1.f / std::sqrt(ss / dv + eps_);
-      for (int j = 0; j < dv; j++) o_[vh * dv + j] = ov[j] * inv * (1.f + nw[j]) * sigm(qkvz_[Cc + vh * dv + j]);
+      for (int j = 0; j < dv; j++) o[vh * dv + j] = ov[j] * inv * (1.f + nw[j]) * sigm(qkvz[Cc + vh * dv + j]);
     }
-    matvec(*ly.out, o_.data(), y_.data(), D, nv * dv);
   }
 
   void attn(const Layer &ly, const float *x) {
-    const int D = d_, nh = nh_, nkv = nkv_, hd = hd_, half = rot_ / 2, rep = nh / nkv, pos = pos_;
+    const int D = d_, nh = nh_, nkv = nkv_, hd = hd_;
     matvec(*ly.q, x, qa_.data(), 2 * nh * hd, D); matvec(*ly.k, x, ka_.data(), nkv * hd, D); matvec(*ly.v, x, va_.data(), nkv * hd, D);
-    float cs[128], sn[128];
-    for (int i = 0; i < half; i++) { const float a = (float)pos * (float)inv_[i]; cs[i] = std::cos(a); sn[i] = std::sin(a); }
-    auto rope_norm = [&](float *out, const float *src, const float *w) {   // zero-centred RMSNorm over the head, partial RoPE
-      float ss = 0; for (int i = 0; i < hd; i++) ss += src[i] * src[i];
-      const float inv = 1.f / std::sqrt(ss / hd + eps_);
-      for (int i = 0; i < hd; i++) out[i] = src[i] * inv * (1.f + w[i]);
-      for (int i = 0; i < half; i++) { float a = out[i], b = out[i + half]; out[i] = a * cs[i] - b * sn[i]; out[i + half] = b * cs[i] + a * sn[i]; }
-    };
-    float *kc = state_.data() + ly.off_a, *vc = state_.data() + ly.off_b;
-    const float *qn = ly.qn->f32(), *kn = ly.kn->f32();
-    for (int g = 0; g < nkv; g++) { rope_norm(kc + ((size_t)pos * nkv + g) * hd, ka_.data() + g * hd, kn); memcpy(vc + ((size_t)pos * nkv + g) * hd, va_.data() + g * hd, 4 * hd); }
-    const int T = pos + 1; const float scl = 1.f / std::sqrt((float)hd);
-    auto heads = [&](int h0, int h1) {
-      std::vector<float> sc(T), qv(hd);
-      for (int h = h0; h < h1; h++) {
-        rope_norm(qv.data(), qa_.data() + h * 2 * hd, qn); const int g = h / rep; float mx = -1e30f;
-        for (int t = 0; t < T; t++) { const float *kk = kc + ((size_t)t * nkv + g) * hd; float s = dot_f32(qv.data(), kk, hd); s *= scl; sc[t] = s; mx = std::max(mx, s); }
-        float sum = 0; for (int t = 0; t < T; t++) { sc[t] = std::exp(sc[t] - mx); sum += sc[t]; }
-        float *out = ao_.data() + h * hd; std::fill(out, out + hd, 0.f); const float isum = 1.f / sum;
-        for (int t = 0; t < T; t++) { const float *vv = vc + ((size_t)t * nkv + g) * hd; axpy_f32(sc[t] * isum, vv, out, hd); }
-        for (int i = 0; i < hd; i++) out[i] *= sigm(qa_[h * 2 * hd + hd + i]);
-      }
-    };
-    if ((int64_t)T * nh * hd > (1 << 15)) pool().parallel_for(nh, heads, 1); else heads(0, nh);
+    attn_kv(ly, ka_.data(), va_.data(), pos_);
+    auto heads = [&](int h0, int h1) { attn_heads(ly, qa_.data(), pos_, ao_.data(), h0, h1); };
+    if ((int64_t)(pos_ + 1) * nh * hd > (1 << 15)) pool().parallel_for(nh, heads, 1); else heads(0, nh);
     matvec(*ly.o, ao_.data(), y_.data(), D, nh * hd);
+  }
+  // zero-centred RMSNorm over one head, then partial RoPE at position pos
+  void rope_norm(float *out, const float *src, const float *w, int pos) const {
+    const int hd = hd_, half = rot_ / 2; float cs[128], sn[128];
+    for (int i = 0; i < half; i++) { const float a = (float)pos * (float)inv_[i]; cs[i] = std::cos(a); sn[i] = std::sin(a); }
+    float ss = 0; for (int i = 0; i < hd; i++) ss += src[i] * src[i];
+    const float inv = 1.f / std::sqrt(ss / hd + eps_);
+    for (int i = 0; i < hd; i++) out[i] = src[i] * inv * (1.f + w[i]);
+    for (int i = 0; i < half; i++) { float a = out[i], b = out[i + half]; out[i] = a * cs[i] - b * sn[i]; out[i + half] = b * cs[i] + a * sn[i]; }
+  }
+  void attn_kv(const Layer &ly, const float *k, const float *v, int pos) {   // K/V of one token into the cache
+    float *kc = state_.data() + ly.off_a, *vc = state_.data() + ly.off_b; const float *kn = ly.kn->f32();
+    for (int g = 0; g < nkv_; g++) { rope_norm(kc + ((size_t)pos * nkv_ + g) * hd_, k + g * hd_, kn, pos); memcpy(vc + ((size_t)pos * nkv_ + g) * hd_, v + g * hd_, 4 * hd_); }
+  }
+  // heads [h0, h1) of the token at pos: q2 = [query (hd) | gate (hd)] per head, attends to cache positions 0..pos
+  void attn_heads(const Layer &ly, const float *q2, int pos, float *ao, int h0, int h1) const {
+    const int hd = hd_, nkv = nkv_, rep = nh_ / nkv_, T = pos + 1; const float scl = 1.f / std::sqrt((float)hd);
+    const float *kc = state_.data() + ly.off_a, *vc = state_.data() + ly.off_b, *qn = ly.qn->f32();
+    std::vector<float> sc(T), qv(hd);
+    for (int h = h0; h < h1; h++) {
+      rope_norm(qv.data(), q2 + h * 2 * hd, qn, pos); const int g = h / rep; float mx = -1e30f;
+      for (int t = 0; t < T; t++) { const float *kk = kc + ((size_t)t * nkv + g) * hd; float s = dot_f32(qv.data(), kk, hd); s *= scl; sc[t] = s; mx = std::max(mx, s); }
+      float sum = 0; for (int t = 0; t < T; t++) { sc[t] = std::exp(sc[t] - mx); sum += sc[t]; }
+      float *out = ao + h * hd; std::fill(out, out + hd, 0.f); const float isum = 1.f / sum;
+      for (int t = 0; t < T; t++) { const float *vv = vc + ((size_t)t * nkv + g) * hd; axpy_f32(sc[t] * isum, vv, out, hd); }
+      for (int i = 0; i < hd; i++) out[i] *= sigm(q2[h * 2 * hd + hd + i]);
+    }
   }
 
   void ple(int tok) {   // hashed 2-/3-gram embeddings -> gated, normalised, dilated causal conv -> added to every stream
-    const int D = d_, HC = hc_, HD = HC * D, nh = (int)p_sizes_.size(), hdim = p_hdim_;
+    const int HD = hc_ * d_, ne = (int)p_sizes_.size() * p_hdim_;
+    ple_gather(tok, e_.data());
+    matvec(*p_key_, e_.data(), tmp_.data(), HD, ne);
+    matvec(*p_val_, e_.data(), pv_.data(), d_, ne);
+    ple_mix(tmp_.data(), pv_.data(), h_.data());
+  }
+  void ple_gather(int tok, float *e) {   // table rows of the n-grams ending at tok (advances the token history)
     const uint64_t sh[3] = {(uint64_t)tok, (uint64_t)p1_, (uint64_t)(p1_ == eos_ ? eos_ : p2_)};   // never reach across <eos>
     int j = 0;
     for (int ng = 2; ng <= 3; ng++) {
       uint64_t hh = sh[0] * p_mult_[0];
       for (int s = 1; s < ng; s++) hh ^= sh[s] * p_mult_[s];
-      for (int k = (ng - 2) * p_hpn_; k < (ng - 1) * p_hpn_; k++, j++) row_f32(*p_tab_, (int64_t)(hh % (uint64_t)p_sizes_[k]) + p_offs_[k], e_.data() + j * hdim);
+      for (int k = (ng - 2) * p_hpn_; k < (ng - 1) * p_hpn_; k++, j++) row_f32(*p_tab_, (int64_t)(hh % (uint64_t)p_sizes_[k]) + p_offs_[k], e + j * p_hdim_);
     }
     p2_ = p1_; p1_ = tok;
-    const int ne = nh * hdim;
-    matvec(*p_key_, e_.data(), tmp_.data(), HD, ne); rmsn(tmp_.data(), p_nk_->f32(), HD, D, true, eps_, pk_.data());
-    matvec(*p_val_, e_.data(), pv_.data(), D, ne);
-    rmsn(h_.data(), p_nq_->f32(), HD, D, true, eps_, pq_.data());
+  }
+  void ple_mix(const float *key, const float *pv, float *h) {   // key: raw key projection (HD), pv: value (D); h += PLE term
+    const int D = d_, HC = hc_, HD = HC * D;
+    rmsn(key, p_nk_->f32(), HD, D, true, eps_, pk_.data());
+    rmsn(h, p_nq_->f32(), HD, D, true, eps_, pq_.data());
     for (int c = 0; c < HC; c++) {
       float s = 0; for (int i = 0; i < D; i++) s += pk_[c * D + i] * pq_[c * D + i];
       s /= std::sqrt((float)D); s = std::sqrt(std::max(std::fabs(s), 1e-6f)) * (s > 0 ? 1.f : s < 0 ? -1.f : 0.f);
-      const float gg = sigm(s); for (int i = 0; i < D; i++) gv_[c * D + i] = gg * pv_[i];
+      const float gg = sigm(s); for (int i = 0; i < D; i++) gv_[c * D + i] = gg * pv[i];
     }
     float *win = state_.data() + ple_win_;   // (span+1) x HD, newest last; zeros before the start = conv zero padding
     memmove(win, win + HD, 4ull * p_span_ * HD);
@@ -243,8 +314,29 @@ class NQ : public Model {
     const float *cw = p_conv_->f32(); const int K = p_K_;
     for (int ch = 0; ch < HD; ch++) {
       float s = 0; for (int jj = 0; jj < K; jj++) s += cw[ch * K + jj] * win[(size_t)(p_span_ - (K - 1 - jj) * p_dil_) * HD + ch];
-      h_[ch] += gv_[ch] + silu(s);
+      h[ch] += gv_[ch] + silu(s);
     }
+  }
+
+  // Gated Residual for B tokens: H [B, HD] -> MIX [B, D] (+ INJ [B, HC])
+  void gres_batch(const GR &g, bool inject, int B) {
+    const int D = d_, HC = hc_, HD = HC * D;
+    pool().parallel_for(B, [&](int a, int b) { for (int i = a; i < b; i++) rmsn(bH_.data() + (size_t)i * HD, g.norm->f32(), HD, D, true, eps_, bHN_.data() + (size_t)i * HD); }, 4);
+    matmul(*g.down, bHN_.data(), B, HD, bLOW_.data(), rank_, rank_, HD);
+    for (size_t i = 0; i < (size_t)B * rank_; i++) bLOW_[i] = silu(bLOW_[i] / HC);
+    matmul(*g.up, bLOW_.data(), B, rank_, bGATE_.data(), HD, HD, rank_);
+    pool().parallel_for(B, [&](int a, int b) {
+      for (int i = a; i < b; i++) {
+        const float *gt = bGATE_.data() + (size_t)i * HD, *hn = bHN_.data() + (size_t)i * HD; float *mx = bMIX_.data() + (size_t)i * D;
+        for (int j = 0; j < D; j++) { float s = 0; for (int c = 0; c < HC; c++) s += sigm(gt[c * D + j]) * hn[c * D + j]; mx[j] = s / HC; }
+      }
+    }, 4);
+    if (inject) { matmul(*g.inj, bHN_.data(), B, HD, bINJ_.data(), HC, HC, HD); for (size_t i = 0; i < (size_t)B * HC; i++) bINJ_[i] = 2.f * sigm(bINJ_[i] / HC); }
+  }
+  void write_batch(int B) {   // H_i += Y_i * INJ_i per stream
+    const int D = d_, HC = hc_;
+    for (int i = 0; i < B; i++) { float *h = bH_.data() + (size_t)i * HC * D; const float *y = bY_.data() + (size_t)i * D, *inj = bINJ_.data() + (size_t)i * HC;
+      for (int c = 0; c < HC; c++) for (int j = 0; j < D; j++) h[c * D + j] += y[j] * inj[c]; }
   }
 
   int d_, hc_, L_, rank_, ff_, V_, nk_, nv_, dk_, dv_, K_, nh_, nkv_, hd_, rot_, ctx_, eos_, ple_layer_ = -1; float eps_;
@@ -255,6 +347,7 @@ class NQ : public Model {
   std::vector<int64_t> p_sizes_, p_offs_; std::vector<uint64_t> p_mult_;
   const Tensor *p_tab_ = nullptr, *p_key_, *p_val_, *p_nk_, *p_nq_, *p_nc_, *p_conv_; int p_hpn_ = 0, p_hdim_ = 0, p_dil_ = 1, p_K_ = 1, p_span_ = 0; size_t ple_win_ = 0;
   std::vector<float> state_;
+  std::vector<float> bH_, bHN_, bLOW_, bGATE_, bMIX_, bINJ_, bY_, bE_, bTK_, bPV_, bQA_, bKA_, bVA_, bAO_, bQKVZ_, bBA_, bO_, bGU_, bACT_;   // prompt batch
   std::vector<float> h_, hn_, low_, gate_, mixed_, inj_, y_, gu_, act_, qkvz_, ba_, xc_, qh_, kh_, o_, qa_, ka_, va_, ao_, e_, pk_, pv_, pq_, gv_, tmp_, fin_v_, logits_;
 };
 
