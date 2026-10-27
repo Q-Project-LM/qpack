@@ -19,11 +19,15 @@ static void usage() {
           "  --temp F --top-k N --top-p F --min-p F --repeat-penalty F --repeat-last-n N --seed N\n"
           "  --think                start the N-Q answer with <THINK>\n"
           "  --selftest             run the container's self-test and exit\n"
-          "  --verbose              print timings after every reply\n");
+          "  --verbose              print timings after every reply\n"
+          "  --lookup N             speculative decoding by prompt lookup, up to N tokens per step (helps models of a few\n"
+          "                         hundred MB and up on repetitive output: code edits, quoting, summaries)\n"
+          "  --draft model.qpack    speculative decoding with a smaller model of the same tokenizer; --draft-k N (4)\n");
 }
 
 int main(int argc, char **argv) {
   std::string path, prompt, ask, system; int n_predict = 512, ctx = 0; bool selftest = false, verbose = false, think = false, have_prompt = false, have_ask = false;
+  int lookup = 0, draft_k = 4; std::string draft;
   qp::SamplerParams sp;
   for (int i = 1; i < argc; i++) {
     std::string a = argv[i];
@@ -43,6 +47,9 @@ int main(int argc, char **argv) {
     else if (a == "--repeat-last-n") sp.repeat_last_n = std::stoi(next());
     else if (a == "--seed") sp.seed = std::stoull(next());
     else if (a == "--think") think = true;
+    else if (a == "--lookup") lookup = std::stoi(next());
+    else if (a == "--draft") draft = next();
+    else if (a == "--draft-k") draft_k = std::stoi(next());
     else if (a == "--selftest") selftest = true;
     else if (a == "--verbose") verbose = true;
     else if (a == "-h" || a == "--help") { usage(); return 0; }
@@ -61,6 +68,8 @@ int main(int argc, char **argv) {
       return st.ok == st.n ? 0 : 1;
     }
     qp::Session s(std::move(model));
+    if (lookup > 0) s.set_lookup(lookup);
+    if (!draft.empty()) s.set_draft(qp::load_model(draft, s.model().max_ctx()), draft_k);
     qp::Sampler sampler(sp);
     fprintf(stderr, "%s: %s, chat format %s, ctx %d, %d threads, loaded in %.2f s\n", path.c_str(), s.model().arch().c_str(), s.chat().name().c_str(),
             s.model().max_ctx(), qp::pool().size(), load);
@@ -68,6 +77,7 @@ int main(int argc, char **argv) {
     auto stats = [&](const qp::GenResult &r) {
       fprintf(stderr, "\n[prompt %d tok (%d cached) %.1f tok/s | gen %zu tok %.1f tok/s | %s]\n", r.prompt_tokens, r.reused,
               (r.prompt_tokens - r.reused) / std::max(r.prefill_s, 1e-9), r.ids.size(), r.ids.size() / std::max(r.decode_s, 1e-9), r.finish.c_str());
+      if (r.drafted) fprintf(stderr, "[speculative: %d drafted, %d accepted, %d passes]\n", r.drafted, r.accepted, r.verify_passes);
     };
     if (have_prompt) {
       std::vector<int> ids = s.tok().encode(prompt);

@@ -71,7 +71,7 @@ bool more_bits(const std::string &name, int n_layers) {
   if (tail != "w_down" && tail != "ffn.down.weight") return false;
   return i < n_layers / 8 || i >= 7 * n_layers / 8 || (i - n_layers / 8) % 3 == 2;
 }
-const char *kUsage = "usage: qpack-quantize in.qpack out.qpack [--type q4|q4m|q8] [--keep-q8 name,...] [--calib text.txt [--gptq [--act-order]]] [--calib-tokens 4096] [-t threads]\n";
+const char *kUsage = "usage: qpack-quantize in.qpack out.qpack [--type q4|q4m|q8] [--keep-q8 name,...] [--q4-head] [--calib text.txt [--gptq [--act-order]]] [--calib-tokens 4096] [-t threads]\n";
 
 // statistics of every matrix input from running the source model over calibration text: mean squared activation per
 // column (importance), and with gptq the second moment H = sum x x^T (shared by matrices reading the same input)
@@ -202,7 +202,7 @@ void gptq_q4(const qp::Tensor &t, const std::vector<float> &Hf, uint8_t *q, uint
 }  // namespace
 
 int main(int argc, char **argv) {
-  std::string in, out, type = "q4", calib; int calib_tokens = 4096; bool gptq = false, act_order = false; std::set<std::string> keep;
+  std::string in, out, type = "q4", calib; int calib_tokens = 4096; bool gptq = false, act_order = false, q4_head = false; std::set<std::string> keep;
   for (int i = 1; i < argc; i++) {
     std::string a = argv[i];
     if (a == "--type" && i + 1 < argc) type = argv[++i];
@@ -213,13 +213,14 @@ int main(int argc, char **argv) {
     else if (a == "--calib" && i + 1 < argc) calib = argv[++i];
     else if (a == "--calib-tokens" && i + 1 < argc) calib_tokens = std::stoi(argv[++i]);
     else if (a == "--gptq") gptq = true;
+    else if (a == "--q4-head") q4_head = true;
     else if (a == "--act-order") act_order = true;
     else if (in.empty() && a[0] != '-') in = a;
     else if (out.empty() && a[0] != '-') out = a;
     else { fputs(kUsage, stderr); return 2; }
   }
   if (in.empty() || out.empty() || (type != "q4" && type != "q4m" && type != "q8")) { fputs(kUsage, stderr); return 2; }
-  for (const char *n : {"embed", "lm_head", "embed.weight", "lm_head.weight"}) keep.insert(n);
+  if (!q4_head) for (const char *n : {"embed", "lm_head", "embed.weight", "lm_head.weight"}) keep.insert(n);
   try {
     auto t0 = std::chrono::steady_clock::now();
     if (gptq && calib.empty()) { fprintf(stderr, "--gptq needs --calib text.txt\n"); return 2; }

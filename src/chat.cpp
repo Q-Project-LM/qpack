@@ -74,6 +74,56 @@ const float *Session::eval(const std::vector<int> &ids, int *reused) {
   return lg;
 }
 
+void Session::set_draft(std::unique_ptr<Model> draft, int k) {
+  if (draft && draft->vocab() != m_->vocab()) throw std::runtime_error("draft model: vocabulary differs from the main model");
+  draft_ = std::move(draft); draft_k_ = draft_ ? k : 0; dhist_.clear(); dck_.clear(); dck_len_ = 0;
+}
+
+// prompt lookup: the tokens that followed the most recent earlier occurrence of the last n-gram (n = max .. min)
+std::vector<int> Session::propose(const std::vector<int> &seq, int k) {
+  std::vector<int> out;
+  if (lookup_k_ > 0) {
+    const int L = (int)seq.size();
+    for (int n = ngram_max_; n >= ngram_min_ && out.empty(); n--) {
+      if (L <= n) continue;
+      for (int j = L - n - 1; j >= 0; j--) {   // occurrence seq[j .. j+n) == last n tokens, with something after it
+        bool eq = true; for (int i = 0; i < n && eq; i++) eq = seq[j + i] == seq[L - n + i];
+        if (!eq) continue;
+        for (int i = j + n; i < L && (int)out.size() < std::min(k, lookup_k_); i++) out.push_back(seq[i]);
+        break;
+      }
+    }
+  }
+  if (out.empty() && draft_) out = propose_draft(seq, std::min(k, draft_k_));
+  return out;
+}
+
+// draft model: bring its state to `seq` (roll back its own guesses from the previous round), then k greedy tokens
+std::vector<int> Session::propose_draft(const std::vector<int> &seq, int k) {
+  Model &d = *draft_;
+  size_t common = 0; while (common < dhist_.size() && common < seq.size() && dhist_[common] == seq[common]) common++;
+  if (common < dhist_.size()) {
+    if (!d.rewind((int)common)) {
+      if (!dck_.empty() && dck_len_ <= common) { d.rollback(dck_); dhist_.resize(dck_len_); common = dck_len_; }
+      else { d.reset(); dhist_.clear(); common = 0; }
+    } else dhist_.resize(common);
+  }
+  if (common == seq.size()) {   // nothing new: re-feed the last token to get logits
+    if (!d.rewind((int)common - 1)) { d.reset(); dhist_.clear(); common = 0; } else { dhist_.pop_back(); common--; }
+  }
+  if (common + 1 < seq.size()) d.prefill(seq.data() + common, (int)(seq.size() - 1 - common), 0);
+  if (seq.size() > (size_t)d.max_ctx() - k - 1) return {};
+  dck_ = d.checkpoint(); dck_len_ = seq.size() - 1;
+  const float *lg = d.step(seq.back(), 1); dhist_ = seq;
+  std::vector<int> out;
+  for (int i = 0; i < k; i++) {
+    const int t = (int)(std::max_element(lg, lg + d.vocab()) - lg);
+    out.push_back(t);
+    if (i + 1 < k) { lg = d.step(t, 1); dhist_.push_back(t); }
+  }
+  return out;
+}
+
 GenResult Session::generate(const std::vector<int> &prompt, int max_new, Sampler &s, const std::function<bool(const std::string &)> &on_text,
                             const std::vector<std::string> &stop_strings) {
   GenResult r; r.prompt_tokens = (int)prompt.size();
@@ -83,10 +133,10 @@ GenResult Session::generate(const std::vector<int> &prompt, int max_new, Sampler
   std::string bytes; size_t sent = 0;   // decoded bytes so far; `sent` = prefix already handed to on_text
   r.finish = "length";
   if (circ_) { circ_->clear(); circ_->calls = circ_->failed = 0; }
-  for (int n = 0; n < max_new; n++) {
-    int t = circ_ ? circ_->next(hist_) : -1;   // a circuit result / <ECALC> is forced, not sampled
-    if (t < 0) t = s.sample(lg, m_->vocab(), hist_);
-    if (chat_->is_stop(t)) { r.finish = "stop"; break; }
+  const int V = m_->vocab();
+  // one generated token: false = stop (stop token, stop string, on_text abort, max_new or context reached)
+  auto emit = [&](int t, int pos_before) {   // pos_before: model position before t is fed
+    if (chat_->is_stop(t)) { r.finish = "stop"; return false; }
     r.ids.push_back(t);
     bytes += chat_->display(t, *tok_);
     bool stop_hit = false;
@@ -101,11 +151,60 @@ GenResult Session::generate(const std::vector<int> &prompt, int max_new, Sampler
       break;
     }
     if (!stop_hit) for (auto &ss : stop_strings) for (size_t k = std::min(ss.size(), end - sent + 1) - 1; k > 0 && !ss.empty(); k--) if (bytes.compare(end - k, k, ss, 0, k) == 0) { end -= k; break; }
-    if (end > sent && on_text) { if (!on_text(bytes.substr(sent, end - sent))) { sent = end; r.finish = "stop"; break; } }
+    if (end > sent && on_text) { if (!on_text(bytes.substr(sent, end - sent))) { sent = end; r.finish = "stop"; return false; } }
     if (end > sent) sent = end;
-    if (stop_hit) { r.finish = "stop"; break; }
-    if (m_->pos() >= m_->max_ctx()) { r.finish = "length"; break; }
-    lg = m_->step(t, 1); hist_.push_back(t);
+    if (stop_hit) { r.finish = "stop"; return false; }
+    if ((int)r.ids.size() >= max_new) { r.finish = "length"; return false; }
+    if (pos_before + 1 > m_->max_ctx()) { r.finish = "length"; return false; }
+    return true;
+  };
+  std::vector<std::pair<int, float>> dist;
+  auto next_token = [&](const float *l, size_t hist_len) {   // circuit result / <ECALC> is forced, not sampled
+    const int f = circ_ ? circ_->next(hist_) : -1;
+    if (f >= 0) return f;
+    s.dist(l, V, hist_, dist, hist_len); return s.draw(dist);
+  };
+  const bool spec = lookup_k_ > 0 || draft_;
+  const int eq = tok_->token_id("<EQ>"), calc = tok_->token_id("<CALC>"), ecalc = tok_->token_id("<ECALC>");
+  int t = max_new > 0 ? next_token(lg, hist_.size()) : -1;
+  // adaptive draft length: doubled after a fully accepted pass, cut to (accepted + 1) after a rejection
+  const int max_k = std::max(lookup_k_, draft_k_); int cur_k = std::min(4, max_k);
+  while (t >= 0 && emit(t, m_->pos())) {
+    std::vector<int> drafts;
+    if (spec && !(circ_ && (circ_->busy() || t == eq))) {
+      std::vector<int> seq = hist_; seq.push_back(t);
+      const int room = std::min(max_new - (int)r.ids.size(), m_->max_ctx() - m_->pos() - 1);
+      drafts = propose(seq, std::min(cur_k, std::min(room, 15)));
+      for (size_t i = 0; i < drafts.size(); i++)   // circuit spans are left to the executor
+        if (drafts[i] == eq || drafts[i] == calc || drafts[i] == ecalc || chat_->is_stop(drafts[i])) { drafts.resize(i); break; }
+    }
+    if (drafts.empty()) { lg = m_->step(t, 1); hist_.push_back(t); t = next_token(lg, hist_.size()); continue; }
+    // verify t + drafts in one batched pass; logits row i = distribution after seq[i]
+    const int k = (int)drafts.size(); const size_t base = hist_.size();
+    std::vector<int> seq{t}; seq.insert(seq.end(), drafts.begin(), drafts.end());
+    if (vlog_.size() < (size_t)(k + 1) * V) vlog_.resize((size_t)(k + 1) * V);
+    const auto ck = m_->checkpoint();
+    { ExactBatches ex; m_->prefill_all(seq.data(), k + 1, vlog_.data()); }
+    hist_.insert(hist_.end(), seq.begin(), seq.end());
+    r.drafted += k; r.verify_passes++;
+    int acc = 0, next = -1; bool stopped = false;
+    for (int i = 0; i < k; i++) {
+      s.dist(vlog_.data() + (size_t)i * V, V, hist_, dist, base + 1 + i);
+      int repl = -1;
+      if (!s.accept(dist, drafts[i], &repl)) { next = repl; break; }
+      acc++;
+      if (!emit(drafts[i], (int)base + 1 + i)) { stopped = true; break; }
+    }
+    r.accepted += acc;
+    cur_k = acc == k ? std::min(max_k, 2 * cur_k) : std::max(2, std::min(max_k, acc + 1));
+    const int keep = stopped ? acc : 1 + acc;   // a token that ended the reply is not fed (as in plain decoding)
+    if (keep < k + 1) {   // drop the rejected tail from the model state
+      if (!m_->rewind((int)base + keep)) { ExactBatches ex; m_->rollback(ck); m_->prefill(seq.data(), keep, 0); }
+      hist_.resize(base + keep);
+    }
+    if (stopped) break;
+    if (next < 0) next = next_token(vlog_.data() + (size_t)k * V, hist_.size());   // all accepted: the token after the last draft
+    t = next;
   }
   if (sent < bytes.size() && on_text) on_text(bytes.substr(sent));
   if (circ_) { r.circuit_calls = circ_->calls; r.circuit_failed = circ_->failed; }

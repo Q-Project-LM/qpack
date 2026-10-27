@@ -4,6 +4,7 @@
 //   Model      — one decode step at a time: Llama family (Llama, Qwen2, Mistral, SmolLM) and N-Q (Gated DeltaNet).
 #pragma once
 #include <cstdint>
+#include <algorithm>
 #include <functional>
 #include <memory>
 #include <string>
@@ -84,6 +85,10 @@ void matmul(const Tensor &W, const float *X, int B, int ldx, float *Y, int ldy, 
 // optional observer of every matrix product input (B vectors of `cols` floats, stride ldx): calibration statistics for
 // qpack-quantize. Called on the caller's thread before the product; nullptr (default) = off.
 extern std::function<void(const Tensor &W, const float *X, int B, int ldx, int cols)> g_act_hook;
+// while set (on this thread), matmul with B <= 16 gives results bit-identical to B matvec() calls (speculative
+// verification and replay must reproduce plain decoding exactly); otherwise the faster tiled kernels are used
+extern thread_local bool g_exact_batches;
+struct ExactBatches { bool old; ExactBatches() : old(g_exact_batches) { g_exact_batches = true; } ~ExactBatches() { g_exact_batches = old; } };
 void exp_v(const float *x, float *y, int n);                 // AVX2 elementwise (rel. error ~2e-7)
 void sigmoid_v(const float *x, float *y, int n);
 void silu_mul(float *g, const float *u, int n);             // g = silu(g) * u
@@ -109,6 +114,14 @@ class Model {
     const float *r = nullptr; for (int i = 0; i < n; i++) r = step(tokens[i], i + 1 == n ? want : 0); return r;
   }
   virtual void reset() = 0;
+  // n tokens at once with the logits of every position (n x vocab) — verification of speculative tokens
+  virtual void prefill_all(const int *tokens, int n, float *logits) {   // callers hold ExactBatches for bit-exact results
+    for (int i = 0; i < n; i++) { const float *l = step(tokens[i], 1); std::copy(l, l + vocab(), logits + (size_t)i * vocab()); }
+  }
+  // a cheap checkpoint to roll speculative tokens back: the position and the recurrent state, not the per-position caches
+  // (entries after the restored position are simply overwritten later)
+  virtual std::vector<uint8_t> checkpoint() const { return snapshot(); }
+  virtual void rollback(const std::vector<uint8_t> &c) { restore(c); }
   // drop the state after the first `pos` tokens; false if the model cannot (recurrent state without a snapshot)
   virtual bool rewind(int pos) { return pos == this->pos(); }
   virtual bool recurrent() const { return false; }   // state is not a per-token cache (prefix reuse needs snapshots)

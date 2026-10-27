@@ -100,6 +100,27 @@ class NQ : public Model {
   int pos() const override { return pos_; }
   std::string arch() const override { return "nq4"; }
   bool recurrent() const override { return true; }
+  // checkpoint = header + the recurrent parts of the state (PLE window, DeltaNet conv windows and S); K/V caches are
+  // position-indexed and need no copy
+  std::vector<uint8_t> checkpoint() const override {
+    std::vector<uint8_t> c(16); int hdr[4] = {pos_, p1_, p2_, ple_n_}; memcpy(c.data(), hdr, 16);
+    for (auto &r : recurrent_ranges()) { const size_t o = c.size(); c.resize(o + r.second * 4); memcpy(c.data() + o, state_.data() + r.first, r.second * 4); }
+    return c;
+  }
+  void rollback(const std::vector<uint8_t> &c) override {
+    int hdr[4]; memcpy(hdr, c.data(), 16); pos_ = hdr[0]; p1_ = hdr[1]; p2_ = hdr[2]; ple_n_ = hdr[3]; size_t o = 16;
+    for (auto &r : recurrent_ranges()) { memcpy(state_.data() + r.first, c.data() + o, r.second * 4); o += r.second * 4; }
+  }
+  std::vector<std::pair<size_t, size_t>> recurrent_ranges() const {
+    std::vector<std::pair<size_t, size_t>> v; const int HD = hc_ * d_, Cc = 2 * nk_ * dk_ + nv_ * dv_;
+    if (ple_layer_ >= 0) v.push_back({ple_win_, (size_t)(p_span_ + 1) * HD});
+    for (auto &ly : layers_) if (!ly.attn) { v.push_back({ly.off_a, (size_t)K_ * Cc}); v.push_back({ly.off_b, (size_t)nv_ * dk_ * dv_}); }
+    return v;
+  }
+  void prefill_all(const int *toks, int n, float *logits) override {
+    if (n == 1) { const float *l = step(toks[0], 1); memcpy(logits, l, 4ull * V_); return; }
+    all_logits_ = logits; prefill(toks, n, 0); all_logits_ = nullptr;
+  }
   void reset() override { pos_ = 0; p1_ = p2_ = eos_; ple_n_ = 0; std::fill(state_.begin(), state_.end(), 0.f); }
 
   std::vector<uint8_t> snapshot() const override {   // header + the whole state block (K/V caches only up to pos)
@@ -161,6 +182,7 @@ class NQ : public Model {
         matmul(*ly.down, bACT_.data(), B, ff_, bY_.data(), D, D, ff_);
         write_batch(B);
       }
+      if (all_logits_) { gres_batch(fin_, false, B); matmul(*head_, bMIX_.data(), B, D, all_logits_ + (size_t)s0 * V_, V_, V_, D); }
       if (ple_layer_ < 0) for (int i = 0; i < B; i++) { p2_ = p1_; p1_ = toks[s0 + i]; }
       pos_ += B;
       if (s0 + B == n) memcpy(h_.data(), bH_.data() + (size_t)(B - 1) * HD, 4 * HD);
@@ -341,7 +363,7 @@ class NQ : public Model {
   }
 
   int d_, hc_, L_, rank_, ff_, V_, nk_, nv_, dk_, dv_, K_, nh_, nkv_, hd_, rot_, ctx_, eos_, ple_layer_ = -1; float eps_;
-  int pos_ = 0, p1_ = 0, p2_ = 0, ple_n_ = 0;
+  int pos_ = 0, p1_ = 0, p2_ = 0, ple_n_ = 0; float *all_logits_ = nullptr;
   std::vector<double> inv_;
   const Tensor *embed_, *head_, *decide_w_ = nullptr, *decide_b_ = nullptr; GR fin_;
   std::vector<Layer> layers_;

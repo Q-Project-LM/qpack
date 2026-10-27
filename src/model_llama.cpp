@@ -42,6 +42,12 @@ class Llama : public Model {
   int pos() const override { return pos_; }
   std::string arch() const override { return "llama:" + cfg_["model_type"].as_str(); }
   void reset() override { pos_ = 0; }
+  std::vector<uint8_t> checkpoint() const override { std::vector<uint8_t> c(4); memcpy(c.data(), &pos_, 4); return c; }
+  void rollback(const std::vector<uint8_t> &c) override { memcpy(&pos_, c.data(), 4); }
+  void prefill_all(const int *toks, int n, float *logits) override {
+    if (n == 1) { const float *l = step(toks[0], 1); memcpy(logits, l, 4ull * V_); return; }
+    all_logits_ = logits; prefill(toks, n, 0); all_logits_ = nullptr;
+  }
   bool rewind(int pos) override { if (pos < 0 || pos > pos_) return false; pos_ = pos; return true; }
 
   std::vector<uint8_t> snapshot() const override {   // position + the used prefix of the KV cache
@@ -87,7 +93,8 @@ class Llama : public Model {
           for (int w = a; w < b; w++) {
             const int i = w / nh_, h = w % nh_, T = p0 + i + 1, g = h / rep; const float *qh = bQ_.data() + (size_t)i * qd + h * hd_; float mx = -1e30f;
             for (int t = 0; t < T; t++) { const uint16_t *kk = kl + (size_t)t * kvd_ + g * hd_; float s = dot_f16(qh, kk, hd_); s *= scl; sc[t] = s; mx = std::max(mx, s); }
-            float sum = 0; for (int t = 0; t < T; t++) { sc[t] = std::exp(sc[t] - mx); sum += sc[t]; }
+            float sum = 0; for (int t = 0; t < T; t++) sc[t] -= mx;
+            exp_v(sc.data(), sc.data(), T); for (int t = 0; t < T; t++) sum += sc[t];
             float *out = bA_.data() + (size_t)i * qd + h * hd_; std::fill(out, out + hd_, 0.f); const float inv = 1.f / sum;
             for (int t = 0; t < T; t++) { const uint16_t *vv = vl + (size_t)t * kvd_ + g * hd_; axpy_f16(sc[t] * inv, vv, out, hd_); }
           }
@@ -99,6 +106,14 @@ class Llama : public Model {
         pool().parallel_for(B, [&](int a, int b) { silu_mul(bG_.data() + (size_t)a * ff_, bU_.data() + (size_t)a * ff_, (b - a) * ff_); }, 1);
         matmul(*ly.wd, bG_.data(), B, ff_, bO_.data(), d_, d_, ff_);
         for (size_t j = 0; j < (size_t)B * d_; j++) bX_[j] += bO_[j];
+      }
+      if (all_logits_) {   // speculative verification: logits of every position
+        pool().parallel_for(B, [&](int a, int b) { for (int i = a; i < b; i++) rmsnorm(bX_.data() + (size_t)i * d_, fnorm_->f32(), d_, eps_, bXN_.data() + (size_t)i * d_); }, 4);
+        matmul(*head_, bXN_.data(), B, d_, all_logits_ + (size_t)s0 * V_, V_, V_, d_);
+      }
+      if (g_act_hook) {   // calibration (qpack-quantize): the output head sees every token's final hidden state
+        for (int i = 0; i < B; i++) rmsnorm(bX_.data() + (size_t)i * d_, fnorm_->f32(), d_, eps_, bXN_.data() + (size_t)i * d_);
+        g_act_hook(*head_, bXN_.data(), B, d_, d_);
       }
       pos_ += B;
     }
@@ -159,6 +174,7 @@ class Llama : public Model {
 
  private:
   const bool debug_ = getenv("QPACK_DEBUG") != nullptr;
+  float *all_logits_ = nullptr;
   int d_, L_, nh_, nkv_, hd_, ff_, V_, ctx_, kvd_, pos_ = 0; float eps_; double theta_; bool tie_;
   const Tensor *embed_, *head_, *fnorm_; std::vector<Layer> layers_;
   std::vector<uint16_t> kc_, vc_;

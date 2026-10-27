@@ -19,6 +19,7 @@ class CircuitExecutor {
   CircuitExecutor(const Tokenizer &tok);
   int next(const std::vector<int> &ids);
   void clear() { queue_.clear(); }
+  bool busy() const { return !queue_.empty(); }
   int calls = 0, failed = 0;
   int calc_id, eq_id, ecalc_id;
  private:

@@ -104,6 +104,62 @@ static void rows_q4(const uint8_t *Q, const uint16_t *S, const int16_t *xq, cons
   }
 }
 
+// one row against nt <= 4 activation vectors, with per vector exactly the operations of rows_q8 / rows_q4 (so the
+// results are bit-identical to separate calls) while every weight load serves all nt vectors
+static void row_q8_multi(const int8_t *Q, const float *scale, const int16_t *XQ, int ldq, const float *BS, int nbs, float *Y, int ldy, int r, int nt, int cols) {
+  const int nb = cols / QB; const int8_t *q = Q + (int64_t)r * cols; float acc[4] = {0, 0, 0, 0};
+  for (int b = 0; b < nb; b++) {
+    const int8_t *qb = q + b * QB; __m256i a0[4], a1[4];
+    for (int j = 0; j < nt; j++) a0[j] = a1[j] = _mm256_setzero_si256();
+    for (int c = 0; c < QB; c += 32) {
+      const __m256i w0 = _mm256_cvtepi8_epi16(_mm_loadu_si128((const __m128i *)(qb + c))), w1 = _mm256_cvtepi8_epi16(_mm_loadu_si128((const __m128i *)(qb + c + 16)));
+      for (int j = 0; j < nt; j++) {
+        const int16_t *xb = XQ + (int64_t)j * ldq + b * QB;
+        a0[j] = _mm256_add_epi32(a0[j], _mm256_madd_epi16(w0, _mm256_loadu_si256((const __m256i *)(xb + c))));
+        a1[j] = _mm256_add_epi32(a1[j], _mm256_madd_epi16(w1, _mm256_loadu_si256((const __m256i *)(xb + c + 16))));
+      }
+    }
+    for (int j = 0; j < nt; j++) acc[j] += BS[(int64_t)j * nbs + b] * (float)hsum256i(_mm256_add_epi32(a0[j], a1[j]));
+  }
+  for (int j = 0; j < nt; j++) {
+    const int16_t *xq = XQ + (int64_t)j * ldq; const float *bs = BS + (int64_t)j * nbs;
+    float tail = 0; for (int c = nb * QB; c < cols; c++) tail += (float)q[c] * (float)xq[c];
+    if (nb * QB < cols) acc[j] += bs[nb] * tail;
+    Y[(int64_t)j * ldy + r] = acc[j] * scale[r];
+  }
+}
+static void row_q4_multi(const uint8_t *Q, const uint16_t *S, const int16_t *XQ, int ldq, const float *BS, int nbs, float *Y, int ldy, int r, int nt, int cols) {
+  const int G = cols / 32; const uint8_t *q = Q + (int64_t)r * (cols / 2); const uint16_t *s = S + (int64_t)r * G;
+  float comb[4][1024];
+  for (int j = 0; j < nt; j++) {
+    const float *bs = BS + (int64_t)j * nbs; float bsx[1024]; for (int k = 0; k < G; k++) bsx[k] = bs[k >> 2];
+    int k = 0;
+    for (; k + 8 <= G; k += 8) _mm256_storeu_ps(comb[j] + k, _mm256_mul_ps(_mm256_cvtph_ps(_mm_loadu_si128((const __m128i *)(s + k))), _mm256_loadu_ps(bsx + k)));
+    for (; k < G; k++) comb[j][k] = _cvtsh_ss(s[k]) * bsx[k];
+  }
+  __m256 a0[4], a1[4]; for (int j = 0; j < nt; j++) a0[j] = a1[j] = _mm256_setzero_ps();
+  int k = 0;
+  for (; k + 2 <= G; k += 2) {
+    __m256i l0, h0, l1, h1; unpack_q4(q + 16 * k, l0, h0); unpack_q4(q + 16 * k + 16, l1, h1);
+    for (int j = 0; j < nt; j++) {
+      const int16_t *x = XQ + (int64_t)j * ldq + 32 * k;
+      const __m256i d0 = _mm256_add_epi32(_mm256_madd_epi16(l0, _mm256_loadu_si256((const __m256i *)x)), _mm256_madd_epi16(h0, _mm256_loadu_si256((const __m256i *)(x + 16))));
+      const __m256i d1 = _mm256_add_epi32(_mm256_madd_epi16(l1, _mm256_loadu_si256((const __m256i *)(x + 32))), _mm256_madd_epi16(h1, _mm256_loadu_si256((const __m256i *)(x + 48))));
+      a0[j] = _mm256_fmadd_ps(_mm256_cvtepi32_ps(d0), _mm256_broadcast_ss(comb[j] + k), a0[j]);
+      a1[j] = _mm256_fmadd_ps(_mm256_cvtepi32_ps(d1), _mm256_broadcast_ss(comb[j] + k + 1), a1[j]);
+    }
+  }
+  for (; k < G; k++) {
+    __m256i l0, h0; unpack_q4(q + 16 * k, l0, h0);
+    for (int j = 0; j < nt; j++) {
+      const int16_t *x = XQ + (int64_t)j * ldq + 32 * k;
+      const __m256i d0 = _mm256_add_epi32(_mm256_madd_epi16(l0, _mm256_loadu_si256((const __m256i *)x)), _mm256_madd_epi16(h0, _mm256_loadu_si256((const __m256i *)(x + 16))));
+      a0[j] = _mm256_fmadd_ps(_mm256_cvtepi32_ps(d0), _mm256_broadcast_ss(comb[j] + k), a0[j]);
+    }
+  }
+  for (int j = 0; j < nt; j++) Y[(int64_t)j * ldy + r] = hsum256(_mm256_add_ps(a0[j], a1[j]));
+}
+
 // int16 quantisation of B activation rows (one scale per QB block), rows of ldq entries
 static void quant_rows(const float *X, int B, int ldx, int cols, int ldq, int nb, int16_t *xq, float *bs) {
   auto quant = [&](int i0, int i1) {
@@ -121,6 +177,9 @@ static void quant_rows(const float *X, int B, int ldx, int cols, int ldq, int nb
 }
 
 std::function<void(const Tensor &, const float *, int, int, int)> g_act_hook;
+// matrix-vector products below this many multiply-adds run on the calling thread (a pool round trip costs ~2 us)
+thread_local bool g_exact_batches = false;
+static const int64_t kParMin = [] { const char *e = getenv("QPACK_PAR_MIN"); return e ? atoll(e) : (int64_t)1 << 16; }();
 
 // rows [a, b) of W x; xp / bp: the int16 activations and block scales (q8 / q4 only)
 static void rows_any(const Tensor &W, const float *x, const int16_t *xp, const float *bp, float *y, int a, int b, int cols) {
@@ -150,13 +209,13 @@ void matvec_n(const Tensor *const *W, int nw, const float *x, float *const *y, i
   auto f = [&](int a, int b) {   // global row range -> pieces of each matrix
     for (int i = 0; i < nw; i++) { const int lo = std::max(a, start[i]), hi = std::min(b, start[i + 1]); if (lo < hi) rows_any(*W[i], x, xp, bp, y[i], lo - start[i], hi - start[i], cols); }
   };
-  if ((int64_t)total * cols >= (1 << 16)) pool().parallel_for(total, f, 8); else f(0, total);
+  if ((int64_t)total * cols >= kParMin) pool().parallel_for(total, f, 8); else f(0, total);
 }
 
 void matvec(const Tensor &W, const float *x, float *y, int rows, int cols) {
   if (g_act_hook) g_act_hook(W, x, 1, cols, cols);
   const int64_t work = (int64_t)rows * cols;
-  const bool par = work >= (1 << 16);
+  const bool par = work >= kParMin;
   auto run = [&](const std::function<void(int, int)> &f) { if (par) pool().parallel_for(rows, f, 8); else f(0, rows); };
   switch (W.kind) {
     case Kind::F32: run([&](int a, int b) { rows_f32(W.f32(), x, y, a, b, cols); }); break;
@@ -291,6 +350,27 @@ static void mm_float(LoadW loadw, const float *X, int ldx, int B, float *Y, int 
 void matmul(const Tensor &W, const float *X, int B, int ldx, float *Y, int ldy, int rows, int cols) {
   if (B == 1) { matvec(W, X, Y, rows, cols); return; }
   if (g_act_hook) g_act_hook(W, X, B, ldx, cols);
+  if (B <= 16 && g_exact_batches) {   // small batches (speculative verification): per vector exactly the arithmetic of matvec, each weight row
+                   // still read once for all B vectors, so the results are bit-identical to B matvec() calls
+    const int nb = (cols + QB - 1) / QB, ldq = (cols + 31) & ~31;
+    thread_local std::vector<int16_t> xq; thread_local std::vector<float> bs;
+    if (xq.size() < (size_t)B * ldq + 32) xq.resize((size_t)B * ldq + 32);
+    if (bs.size() < (size_t)B * nb) bs.resize((size_t)B * nb);
+    const bool qz = W.kind == Kind::Q8 || W.kind == Kind::Q4;
+    if (qz) for (int b = 0; b < B; b++) quant_rows(X + (size_t)b * ldx, 1, cols, cols, cols, nb, xq.data() + (size_t)b * ldq, bs.data() + (size_t)b * nb);
+    const int16_t *xp = xq.data(); const float *bp = bs.data();
+    auto f = [&](int a, int b2) {
+      for (int r = a; r < b2; r++)
+        for (int b = 0; b < B; b += 4) {
+          const int nt = std::min(4, B - b);
+          if (W.kind == Kind::Q4) row_q4_multi((const uint8_t *)W.data, W.scale16, xp + (size_t)b * ldq, ldq, bp + (size_t)b * nb, nb, Y + (size_t)b * ldy, ldy, r, nt, cols);
+          else if (W.kind == Kind::Q8) row_q8_multi((const int8_t *)W.data, W.scale, xp + (size_t)b * ldq, ldq, bp + (size_t)b * nb, nb, Y + (size_t)b * ldy, ldy, r, nt, cols);
+          else for (int j = b; j < b + nt; j++) rows_any(W, X + (size_t)j * ldx, xp + (size_t)j * ldq, bp + (size_t)j * nb, Y + (size_t)j * ldy, r, r + 1, cols);
+        }
+    };
+    if ((int64_t)rows * cols >= (1 << 16)) pool().parallel_for(rows, f, 8); else f(0, rows);
+    return;
+  }
   auto run = [&](const std::function<void(int, int)> &f) { if ((int64_t)rows * cols * B >= (1 << 16)) pool().parallel_for(rows, f, 4); else f(0, rows); };
   switch (W.kind) {
     case Kind::F32: {

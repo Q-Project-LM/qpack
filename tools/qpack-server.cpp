@@ -118,6 +118,7 @@ Json usage(const qp::GenResult &r) {
   Json tm = Json::object(); tm.set("prompt_ms", r.prefill_s * 1e3); tm.set("predicted_ms", r.decode_s * 1e3);
   tm.set("predicted_per_second", r.ids.size() / std::max(r.decode_s, 1e-9)); u.set("timings", tm);
   if (r.circuit_calls) { u.set("circuit_calls", r.circuit_calls); u.set("circuit_failed", r.circuit_failed); }
+  if (r.drafted) { u.set("draft_tokens", r.drafted); u.set("draft_accepted", r.accepted); }
   return u;
 }
 
@@ -236,7 +237,7 @@ void handle(int fd) {
 }  // namespace
 
 int main(int argc, char **argv) {
-  std::string path, host = "127.0.0.1", alias; int port = 8080, ctx = 0;
+  std::string path, host = "127.0.0.1", alias, draft; int port = 8080, ctx = 0, lookup = 0, draft_k = 4;
   for (int i = 1; i < argc; i++) {
     std::string a = argv[i];
     auto next = [&]() -> std::string { if (i + 1 >= argc) { fprintf(stderr, "missing value for %s\n", a.c_str()); exit(2); } return argv[++i]; };
@@ -246,13 +247,20 @@ int main(int argc, char **argv) {
     else if (a == "-c" || a == "--ctx") ctx = std::stoi(next());
     else if (a == "-t" || a == "--threads") qp::set_threads(std::stoi(next()));
     else if (a == "-a" || a == "--alias") alias = next();
+    else if (a == "--lookup") lookup = std::stoi(next());
+    else if (a == "--draft") draft = next();
+    else if (a == "--draft-k") draft_k = std::stoi(next());
     else if (path.empty() && a[0] != '-') path = a;
-    else { fprintf(stderr, "usage: qpack-server -m model.qpack [--host 127.0.0.1] [--port 8080] [-c ctx] [-t threads] [-a alias]\n"); return 2; }
+    else { fprintf(stderr, "usage: qpack-server -m model.qpack [--host 127.0.0.1] [--port 8080] [-c ctx] [-t threads] [-a alias] [--lookup N] [--draft model.qpack [--draft-k N]]\n"); return 2; }
   }
-  if (path.empty()) { fprintf(stderr, "usage: qpack-server -m model.qpack [--host 127.0.0.1] [--port 8080] [-c ctx] [-t threads] [-a alias]\n"); return 2; }
+  if (path.empty()) { fprintf(stderr, "usage: qpack-server -m model.qpack [--host 127.0.0.1] [--port 8080] [-c ctx] [-t threads] [-a alias] [--lookup N] [--draft model.qpack [--draft-k N]]\n"); return 2; }
   signal(SIGPIPE, SIG_IGN);
   std::unique_ptr<qp::Session> s;
-  try { s.reset(new qp::Session(qp::load_model(path, ctx))); } catch (const std::exception &e) { fprintf(stderr, "error: %s\n", e.what()); return 1; }
+  try {
+    s.reset(new qp::Session(qp::load_model(path, ctx)));
+    if (lookup > 0) s->set_lookup(lookup);
+    if (!draft.empty()) s->set_draft(qp::load_model(draft, s->model().max_ctx()), draft_k);
+  } catch (const std::exception &e) { fprintf(stderr, "error: %s\n", e.what()); return 1; }
   g_s = s.get();
   if (alias.empty()) {   // file name without .qpack; "model.q8.qpack" in a release folder takes the folder name
     size_t sl = path.find_last_of('/'); alias = sl == std::string::npos ? path : path.substr(sl + 1);
