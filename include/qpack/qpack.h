@@ -75,6 +75,8 @@ void write_container(const std::string &path, const std::vector<std::pair<std::s
 // ------------------------------------------------------------------ kernels
 // y[0..rows) = W x for a 2-D tensor (rows x cols); threaded over rows when the matrix is large enough.
 void matvec(const Tensor &W, const float *x, float *y, int rows, int cols);
+// several matrices reading the same input (q/k/v, gate/up): one activation quantisation and one parallel pass (nw <= 7)
+void matvec_n(const Tensor *const *W, int nw, const float *x, float *const *y, int cols);
 void row_f32(const Tensor &W, int64_t r, float *out);       // one row as float (embedding / table lookups)
 // Y[b*ldy + r] = sum_c W[r, c] * X[b*ldx + c] for B input vectors at once (prompt batches): each weight row is read once
 // per batch instead of once per token
@@ -82,6 +84,9 @@ void matmul(const Tensor &W, const float *X, int B, int ldx, float *Y, int ldy, 
 // optional observer of every matrix product input (B vectors of `cols` floats, stride ldx): calibration statistics for
 // qpack-quantize. Called on the caller's thread before the product; nullptr (default) = off.
 extern std::function<void(const Tensor &W, const float *X, int B, int ldx, int cols)> g_act_hook;
+void exp_v(const float *x, float *y, int n);                 // AVX2 elementwise (rel. error ~2e-7)
+void sigmoid_v(const float *x, float *y, int n);
+void silu_mul(float *g, const float *u, int n);             // g = silu(g) * u
 float dot_f32(const float *a, const float *b, int n);           // AVX2 helpers for attention
 void axpy_f32(float a, const float *x, float *y, int n);      // y += a x
 void to_f16(const float *x, uint16_t *y, int n);                // fp16 KV cache

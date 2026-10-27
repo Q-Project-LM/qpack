@@ -122,6 +122,37 @@ static void quant_rows(const float *X, int B, int ldx, int cols, int ldq, int nb
 
 std::function<void(const Tensor &, const float *, int, int, int)> g_act_hook;
 
+// rows [a, b) of W x; xp / bp: the int16 activations and block scales (q8 / q4 only)
+static void rows_any(const Tensor &W, const float *x, const int16_t *xp, const float *bp, float *y, int a, int b, int cols) {
+  switch (W.kind) {
+    case Kind::F32: rows_f32(W.f32(), x, y, a, b, cols); break;
+    case Kind::F16: rows_f16((const uint16_t *)W.data, x, y, a, b, cols); break;
+    case Kind::Q8: rows_q8((const int8_t *)W.data, W.scale, xp, bp, y, a, b, cols); break;
+    case Kind::Q4: rows_q4((const uint8_t *)W.data, W.scale16, xp, bp, y, a, b, cols); break;
+    default: throw std::runtime_error("matvec: unsupported tensor kind for " + W.name);
+  }
+}
+
+void matvec_n(const Tensor *const *W, int nw, const float *x, float *const *y, int cols) {
+  if (nw == 1) { matvec(*W[0], x, y[0], (int)W[0]->rows(), cols); return; }
+  int total = 0, start[8]; bool quant = false;
+  for (int i = 0; i < nw; i++) {
+    if (g_act_hook) g_act_hook(*W[i], x, 1, cols, cols);
+    start[i] = total; total += (int)W[i]->rows(); quant |= W[i]->kind == Kind::Q8 || W[i]->kind == Kind::Q4;
+  }
+  start[nw] = total;
+  const int nb = (cols + QB - 1) / QB;
+  thread_local std::vector<int16_t> xq; thread_local std::vector<float> bs;
+  if ((int)xq.size() < cols + 32) xq.resize(cols + 32);
+  if ((int)bs.size() < nb) bs.resize(nb);
+  if (quant) quant_rows(x, 1, cols, cols, cols, nb, xq.data(), bs.data());
+  const int16_t *xp = xq.data(); const float *bp = bs.data();
+  auto f = [&](int a, int b) {   // global row range -> pieces of each matrix
+    for (int i = 0; i < nw; i++) { const int lo = std::max(a, start[i]), hi = std::min(b, start[i + 1]); if (lo < hi) rows_any(*W[i], x, xp, bp, y[i], lo - start[i], hi - start[i], cols); }
+  };
+  if ((int64_t)total * cols >= (1 << 16)) pool().parallel_for(total, f, 8); else f(0, total);
+}
+
 void matvec(const Tensor &W, const float *x, float *y, int rows, int cols) {
   if (g_act_hook) g_act_hook(W, x, 1, cols, cols);
   const int64_t work = (int64_t)rows * cols;
@@ -305,6 +336,37 @@ void row_f32(const Tensor &W, int64_t r, float *out) {
     }
     default: throw std::runtime_error("row_f32: unsupported tensor kind for " + W.name);
   }
+}
+
+// exp(x) for 8 floats: 2^k * p(r), |r| <= ln2/2, degree-6 polynomial (relative error ~2e-7), clamped to [-87, 88]
+static inline __m256 exp256(__m256 x) {
+  x = _mm256_min_ps(_mm256_max_ps(x, _mm256_set1_ps(-87.f)), _mm256_set1_ps(88.f));
+  const __m256 k = _mm256_round_ps(_mm256_mul_ps(x, _mm256_set1_ps(1.44269504088896341f)), _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+  const __m256 r = _mm256_fnmadd_ps(k, _mm256_set1_ps(0.693359375f), _mm256_fnmadd_ps(k, _mm256_set1_ps(-2.12194440e-4f), x));
+  __m256 p = _mm256_set1_ps(1.9875691500e-4f);
+  p = _mm256_fmadd_ps(p, r, _mm256_set1_ps(1.3981999507e-3f)); p = _mm256_fmadd_ps(p, r, _mm256_set1_ps(8.3334519073e-3f));
+  p = _mm256_fmadd_ps(p, r, _mm256_set1_ps(4.1665795894e-2f)); p = _mm256_fmadd_ps(p, r, _mm256_set1_ps(1.6666665459e-1f));
+  p = _mm256_fmadd_ps(p, r, _mm256_set1_ps(5.0000001201e-1f));
+  p = _mm256_fmadd_ps(_mm256_mul_ps(p, r), r, _mm256_add_ps(r, _mm256_set1_ps(1.f)));
+  const __m256i e = _mm256_slli_epi32(_mm256_add_epi32(_mm256_cvtps_epi32(k), _mm256_set1_epi32(127)), 23);
+  return _mm256_mul_ps(p, _mm256_castsi256_ps(e));
+}
+void exp_v(const float *x, float *y, int n) {
+  int i = 0; for (; i + 8 <= n; i += 8) _mm256_storeu_ps(y + i, exp256(_mm256_loadu_ps(x + i)));
+  for (; i < n; i++) y[i] = std::exp(x[i]);
+}
+void sigmoid_v(const float *x, float *y, int n) {
+  const __m256 one = _mm256_set1_ps(1.f); int i = 0;
+  for (; i + 8 <= n; i += 8) _mm256_storeu_ps(y + i, _mm256_div_ps(one, _mm256_add_ps(one, exp256(_mm256_sub_ps(_mm256_setzero_ps(), _mm256_loadu_ps(x + i))))));
+  for (; i < n; i++) y[i] = 1.f / (1.f + std::exp(-x[i]));
+}
+void silu_mul(float *g, const float *u, int n) {   // g = silu(g) * u
+  const __m256 one = _mm256_set1_ps(1.f); int i = 0;
+  for (; i + 8 <= n; i += 8) {
+    const __m256 v = _mm256_loadu_ps(g + i);
+    _mm256_storeu_ps(g + i, _mm256_mul_ps(_mm256_div_ps(v, _mm256_add_ps(one, exp256(_mm256_sub_ps(_mm256_setzero_ps(), v)))), _mm256_loadu_ps(u + i)));
+  }
+  for (; i < n; i++) g[i] = g[i] / (1.f + std::exp(-g[i])) * u[i];
 }
 
 float dot_f32(const float *a, const float *b, int n) {

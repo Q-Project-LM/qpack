@@ -96,7 +96,7 @@ class Llama : public Model {
         for (size_t j = 0; j < (size_t)B * d_; j++) bX_[j] += bO_[j];
         pool().parallel_for(B, [&](int a, int b) { for (int i = a; i < b; i++) rmsnorm(bX_.data() + (size_t)i * d_, ly.fn->f32(), d_, eps_, bXN_.data() + (size_t)i * d_); }, 4);
         matmul(*ly.wg, bXN_.data(), B, d_, bG_.data(), ff_, ff_, d_); matmul(*ly.wu, bXN_.data(), B, d_, bU_.data(), ff_, ff_, d_);
-        pool().parallel_for(B, [&](int a, int b) { for (size_t j = (size_t)a * ff_; j < (size_t)b * ff_; j++) bG_[j] = bG_[j] / (1.f + std::exp(-bG_[j])) * bU_[j]; }, 1);
+        pool().parallel_for(B, [&](int a, int b) { silu_mul(bG_.data() + (size_t)a * ff_, bU_.data() + (size_t)a * ff_, (b - a) * ff_); }, 1);
         matmul(*ly.wd, bG_.data(), B, ff_, bO_.data(), d_, d_, ff_);
         for (size_t j = 0; j < (size_t)B * d_; j++) bX_[j] += bO_[j];
       }
@@ -122,7 +122,7 @@ class Llama : public Model {
     for (int l = 0; l < L_; l++) {
       const Layer &ly = layers_[l];
       rmsnorm(x_.data(), ly.an->f32(), d_, eps_, xn_.data());
-      matvec(*ly.wq, xn_.data(), q_.data(), nh_ * hd_, d_); matvec(*ly.wk, xn_.data(), k_.data(), kvd_, d_); matvec(*ly.wv, xn_.data(), v_.data(), kvd_, d_);
+      { const Tensor *w[3] = {ly.wq, ly.wk, ly.wv}; float *o[3] = {q_.data(), k_.data(), v_.data()}; matvec_n(w, 3, xn_.data(), o, d_); }
       if (ly.bq) { for (int i = 0; i < nh_ * hd_; i++) q_[i] += ly.bq->f32()[i]; for (int i = 0; i < kvd_; i++) { k_[i] += ly.bk->f32()[i]; v_[i] += ly.bv->f32()[i]; } }
       for (int h = 0; h < nh_; h++) rope(q_.data() + h * hd_);
       for (int g = 0; g < nkv_; g++) rope(k_.data() + g * hd_);
@@ -133,7 +133,8 @@ class Llama : public Model {
         for (int h = h0; h < h1; h++) {
           const float *qh = q_.data() + h * hd_; const int g = h / rep; float mx = -1e30f;
           for (int t = 0; t < T; t++) { const uint16_t *kk = kl + (size_t)t * kvd_ + g * hd_; float s = dot_f16(qh, kk, hd_); s *= scl; sc[t] = s; mx = std::max(mx, s); }
-          float sum = 0; for (int t = 0; t < T; t++) { sc[t] = std::exp(sc[t] - mx); sum += sc[t]; }
+          float sum = 0; for (int t = 0; t < T; t++) sc[t] -= mx;
+          exp_v(sc.data(), sc.data(), T); for (int t = 0; t < T; t++) sum += sc[t];
           float *out = att_.data() + h * hd_; std::fill(out, out + hd_, 0.f); const float inv = 1.f / sum;
           for (int t = 0; t < T; t++) { const uint16_t *vv = vl + (size_t)t * kvd_ + g * hd_; axpy_f16(sc[t] * inv, vv, out, hd_); }
         }
@@ -142,11 +143,11 @@ class Llama : public Model {
       matvec(*ly.wo, att_.data(), o_.data(), d_, nh_ * hd_);
       for (int i = 0; i < d_; i++) x_[i] += o_[i];
       rmsnorm(x_.data(), ly.fn->f32(), d_, eps_, xn_.data());
-      matvec(*ly.wg, xn_.data(), g_.data(), ff_, d_); matvec(*ly.wu, xn_.data(), u_.data(), ff_, d_);
-      for (int i = 0; i < ff_; i++) g_[i] = g_[i] / (1.f + std::exp(-g_[i])) * u_[i];
+      { const Tensor *w[2] = {ly.wg, ly.wu}; float *o[2] = {g_.data(), u_.data()}; matvec_n(w, 2, xn_.data(), o, d_); }
+      silu_mul(g_.data(), u_.data(), ff_);
       matvec(*ly.wd, g_.data(), o_.data(), d_, ff_);
       for (int i = 0; i < d_; i++) x_[i] += o_[i];
-      if (getenv("QPACK_DEBUG")) fprintf(stderr, "pos %d layer %d: %.5f %.5f %.5f %.5f\n", pos_, l, x_[0], x_[1], x_[2], x_[3]);
+      if (debug_) fprintf(stderr, "pos %d layer %d: %.5f %.5f %.5f %.5f\n", pos_, l, x_[0], x_[1], x_[2], x_[3]);
     }
     pos_++;
     if (!want) return nullptr;
@@ -157,6 +158,7 @@ class Llama : public Model {
   }
 
  private:
+  const bool debug_ = getenv("QPACK_DEBUG") != nullptr;
   int d_, L_, nh_, nkv_, hd_, ff_, V_, ctx_, kvd_, pos_ = 0; float eps_; double theta_; bool tie_;
   const Tensor *embed_, *head_, *fnorm_; std::vector<Layer> layers_;
   std::vector<uint16_t> kc_, vc_;

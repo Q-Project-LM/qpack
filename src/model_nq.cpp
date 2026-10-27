@@ -157,7 +157,7 @@ class NQ : public Model {
         write_batch(B);
         gres_batch(ly.ffn, true, B);
         matmul(*ly.gu, bMIX_.data(), B, D, bGU_.data(), 2 * ff_, 2 * ff_, D);
-        for (int i = 0; i < B; i++) { const float *g = bGU_.data() + (size_t)i * 2 * ff_; float *a = bACT_.data() + (size_t)i * ff_; for (int j = 0; j < ff_; j++) a[j] = silu(g[j]) * g[ff_ + j]; }
+        for (int i = 0; i < B; i++) { float *g = bGU_.data() + (size_t)i * 2 * ff_; silu_mul(g, g + ff_, ff_); memcpy(bACT_.data() + (size_t)i * ff_, g, 4 * ff_); }
         matmul(*ly.down, bACT_.data(), B, ff_, bY_.data(), D, D, ff_);
         write_batch(B);
       }
@@ -185,8 +185,8 @@ class NQ : public Model {
       write(y_.data());
       gres(ly.ffn, true);
       matvec(*ly.gu, mixed_.data(), gu_.data(), 2 * ff_, d_);
-      for (int i = 0; i < ff_; i++) act_[i] = silu(gu_[i]) * gu_[ff_ + i];
-      matvec(*ly.down, act_.data(), y_.data(), d_, ff_);
+      silu_mul(gu_.data(), gu_.data() + ff_, ff_);
+      matvec(*ly.down, gu_.data(), y_.data(), d_, ff_);
       write(y_.data());
     }
     if (ple_layer_ < 0) { p2_ = p1_; p1_ = tok; }
@@ -205,15 +205,15 @@ class NQ : public Model {
     matvec(*g.down, hn_.data(), low_.data(), rank_, HD);
     for (int i = 0; i < rank_; i++) low_[i] = silu(low_[i] / HC);
     matvec(*g.up, low_.data(), gate_.data(), HD, rank_);
-    for (int j = 0; j < D; j++) { float s = 0; for (int c = 0; c < HC; c++) s += sigm(gate_[c * D + j]) * hn_[c * D + j]; mixed_[j] = s / HC; }
+    sigmoid_v(gate_.data(), gate_.data(), HD);
+    for (int j = 0; j < D; j++) { float s = 0; for (int c = 0; c < HC; c++) s += gate_[c * D + j] * hn_[c * D + j]; mixed_[j] = s / HC; }
     if (inject) { matvec(*g.inj, hn_.data(), inj_.data(), HC, HD); for (int c = 0; c < HC; c++) inj_[c] = 2.f * sigm(inj_[c] / HC); }
   }
   void write(const float *y) { for (int c = 0; c < hc_; c++) for (int j = 0; j < d_; j++) h_[c * d_ + j] += y[j] * inj_[c]; }
 
   void gdn(const Layer &ly, const float *x) {
-    const int D = d_, Cc = 2 * nk_ * dk_ + nv_ * dv_;
-    matvec(*ly.qkvz, x, qkvz_.data(), Cc + nv_ * dv_, D);
-    matvec(*ly.ba, x, ba_.data(), 2 * nv_, D);
+    const int D = d_;
+    { const Tensor *w[2] = {ly.qkvz, ly.ba}; float *o[2] = {qkvz_.data(), ba_.data()}; matvec_n(w, 2, x, o, D); }
     gdn_core(ly, qkvz_.data(), ba_.data(), o_.data());
     matvec(*ly.out, o_.data(), y_.data(), D, nv_ * dv_);
   }
@@ -223,7 +223,8 @@ class NQ : public Model {
     float *win = state_.data() + ly.off_a;
     memmove(win, win + Cc, 4ull * (K - 1) * Cc); memcpy(win + (size_t)(K - 1) * Cc, qkvz, 4ull * Cc);
     const float *cw = ly.conv->f32();
-    for (int ch = 0; ch < Cc; ch++) { float s = 0; for (int j = 0; j < K; j++) s += cw[ch * K + j] * win[(size_t)j * Cc + ch]; xc_[ch] = silu(s); }
+    for (int ch = 0; ch < Cc; ch++) { float s = 0; for (int j = 0; j < K; j++) s += cw[ch * K + j] * win[(size_t)j * Cc + ch]; xc_[ch] = s; }
+    sigmoid_v(xc_.data(), gv_.data(), Cc); for (int ch = 0; ch < Cc; ch++) xc_[ch] *= gv_[ch];   // silu
     const float scale = 1.f / std::sqrt((float)dk);
     for (int h = 0; h < nk; h++) {   // l2-normalised q (scaled) and k per key head
       float sq = 0, sk = 0; for (int i = 0; i < dk; i++) { sq += xc_[h * dk + i] * xc_[h * dk + i]; sk += xc_[kd + h * dk + i] * xc_[kd + h * dk + i]; }
@@ -242,13 +243,14 @@ class NQ : public Model {
       for (int i = 0; i < dk; i++) { float *Sr = S + i * dv; const float ki = k[i], qi = q[i]; for (int j = 0; j < dv; j++) { Sr[j] += ki * kS[j]; ov[j] += qi * Sr[j]; } }
       float ss = 0; for (int j = 0; j < dv; j++) ss += ov[j] * ov[j];
       const float inv = 1.f / std::sqrt(ss / dv + eps_);
-      for (int j = 0; j < dv; j++) o[vh * dv + j] = ov[j] * inv * (1.f + nw[j]) * sigm(qkvz[Cc + vh * dv + j]);
+      float gz[512]; sigmoid_v(qkvz + Cc + vh * dv, gz, dv);
+      for (int j = 0; j < dv; j++) o[vh * dv + j] = ov[j] * inv * (1.f + nw[j]) * gz[j];
     }
   }
 
   void attn(const Layer &ly, const float *x) {
-    const int D = d_, nh = nh_, nkv = nkv_, hd = hd_;
-    matvec(*ly.q, x, qa_.data(), 2 * nh * hd, D); matvec(*ly.k, x, ka_.data(), nkv * hd, D); matvec(*ly.v, x, va_.data(), nkv * hd, D);
+    const int D = d_, nh = nh_, hd = hd_;
+    { const Tensor *w[3] = {ly.q, ly.k, ly.v}; float *o[3] = {qa_.data(), ka_.data(), va_.data()}; matvec_n(w, 3, x, o, D); }
     attn_kv(ly, ka_.data(), va_.data(), pos_);
     auto heads = [&](int h0, int h1) { attn_heads(ly, qa_.data(), pos_, ao_.data(), h0, h1); };
     if ((int64_t)(pos_ + 1) * nh * hd > (1 << 15)) pool().parallel_for(nh, heads, 1); else heads(0, nh);
@@ -283,10 +285,9 @@ class NQ : public Model {
   }
 
   void ple(int tok) {   // hashed 2-/3-gram embeddings -> gated, normalised, dilated causal conv -> added to every stream
-    const int HD = hc_ * d_, ne = (int)p_sizes_.size() * p_hdim_;
+    const int ne = (int)p_sizes_.size() * p_hdim_;
     ple_gather(tok, e_.data());
-    matvec(*p_key_, e_.data(), tmp_.data(), HD, ne);
-    matvec(*p_val_, e_.data(), pv_.data(), d_, ne);
+    { const Tensor *w[2] = {p_key_, p_val_}; float *o[2] = {tmp_.data(), pv_.data()}; matvec_n(w, 2, e_.data(), o, ne); }
     ple_mix(tmp_.data(), pv_.data(), h_.data());
   }
   void ple_gather(int tok, float *e) {   // table rows of the n-grams ending at tok (advances the token history)
@@ -312,10 +313,9 @@ class NQ : public Model {
     memmove(win, win + HD, 4ull * p_span_ * HD);
     rmsn(gv_.data(), p_nc_->f32(), HD, D, true, eps_, win + (size_t)p_span_ * HD);
     const float *cw = p_conv_->f32(); const int K = p_K_;
-    for (int ch = 0; ch < HD; ch++) {
-      float s = 0; for (int jj = 0; jj < K; jj++) s += cw[ch * K + jj] * win[(size_t)(p_span_ - (K - 1 - jj) * p_dil_) * HD + ch];
-      h[ch] += gv_[ch] + silu(s);
-    }
+    for (int ch = 0; ch < HD; ch++) { float s = 0; for (int jj = 0; jj < K; jj++) s += cw[ch * K + jj] * win[(size_t)(p_span_ - (K - 1 - jj) * p_dil_) * HD + ch]; pq_[ch] = s; }
+    sigmoid_v(pq_.data(), pk_.data(), HD);
+    for (int ch = 0; ch < HD; ch++) h[ch] += gv_[ch] + pq_[ch] * pk_[ch];   // silu
   }
 
   // Gated Residual for B tokens: H [B, HD] -> MIX [B, D] (+ INJ [B, HC])
@@ -327,8 +327,9 @@ class NQ : public Model {
     matmul(*g.up, bLOW_.data(), B, rank_, bGATE_.data(), HD, HD, rank_);
     pool().parallel_for(B, [&](int a, int b) {
       for (int i = a; i < b; i++) {
-        const float *gt = bGATE_.data() + (size_t)i * HD, *hn = bHN_.data() + (size_t)i * HD; float *mx = bMIX_.data() + (size_t)i * D;
-        for (int j = 0; j < D; j++) { float s = 0; for (int c = 0; c < HC; c++) s += sigm(gt[c * D + j]) * hn[c * D + j]; mx[j] = s / HC; }
+        float *gt = bGATE_.data() + (size_t)i * HD; const float *hn = bHN_.data() + (size_t)i * HD; float *mx = bMIX_.data() + (size_t)i * D;
+        sigmoid_v(gt, gt, HD);
+        for (int j = 0; j < D; j++) { float s = 0; for (int c = 0; c < HC; c++) s += gt[c * D + j] * hn[c * D + j]; mx[j] = s / HC; }
       }
     }, 4);
     if (inject) { matmul(*g.inj, bHN_.data(), B, HD, bINJ_.data(), HC, HC, HD); for (size_t i = 0; i < (size_t)B * HC; i++) bINJ_[i] = 2.f * sigm(bINJ_[i] / HC); }
