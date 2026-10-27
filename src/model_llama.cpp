@@ -1,14 +1,17 @@
 // Llama-family decoder (Llama, Qwen2, Mistral, SmolLM): RMSNorm, RoPE (rotate-half), GQA, optional q/k/v bias, SwiGLU,
 // tied or untied output head. Tensor names are the canonical ones written by python/qpack/convert_llama.py.
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <immintrin.h>
 #include <stdexcept>
 
 #include "qpack/qpack.h"
 
 namespace qp {
+double g_attn_s = 0;   // profiling: seconds spent in decode attention
 namespace {
 
 struct Layer { const Tensor *an, *fn, *wq, *wk, *wv, *wo, *bq, *bk, *bv, *wg, *wu, *wd; };
@@ -88,7 +91,9 @@ class Llama : public Model {
           for (int g = 0; g < nkv_; g++) rope(k + g * hd_);
           to_f16(k, kl + (size_t)(p0 + i) * kvd_, kvd_); to_f16(v, vl + (size_t)(p0 + i) * kvd_, kvd_);
         }
-        pool().parallel_for(B * nh_, [&](int a, int b) {
+        if (g_exact_batches) {   // speculative verification: the same arithmetic as step()
+          for (int i = 0; i < B; i++) attend(kl, vl, bQ_.data() + (size_t)i * qd, p0 + i + 1, bA_.data() + (size_t)i * qd);
+        } else pool().parallel_for(B * nh_, [&](int a, int b) {
           std::vector<float> sc(p0 + B);
           for (int w = a; w < b; w++) {
             const int i = w / nh_, h = w % nh_, T = p0 + i + 1, g = h / rep; const float *qh = bQ_.data() + (size_t)i * qd + h * hd_; float mx = -1e30f;
@@ -125,15 +130,83 @@ class Llama : public Model {
     return logits_.data();
   }
 
+  static void f16_row(const uint16_t *h, float *f, int n) {
+    int i = 0; for (; i + 8 <= n; i += 8) _mm256_storeu_ps(f + i, _mm256_cvtph_ps(_mm_loadu_si128((const __m128i *)(h + i))));
+    for (; i < n; i++) f[i] = _cvtsh_ss(h[i]);
+  }
+  // scores of the rep query heads of kv group g against positions [t0, t1): the K row stays in registers
+  template <int HD> void scores_tpl(const uint16_t *kl, const float *q, int g, int rep, int t0, int t1, int C, float scl, float *sc) const {
+    for (int t = t0; t < t1; t++) {
+      const uint16_t *kk = kl + (size_t)t * kvd_ + g * HD; __m256 k[HD / 8];
+      for (int i = 0; i < HD / 8; i++) k[i] = _mm256_cvtph_ps(_mm_loadu_si128((const __m128i *)(kk + 8 * i)));
+      for (int j = 0; j < rep; j++) {
+        const float *qj = q + (g * rep + j) * HD; __m256 a0 = _mm256_mul_ps(_mm256_loadu_ps(qj), k[0]), a1 = _mm256_mul_ps(_mm256_loadu_ps(qj + 8), k[1]);
+        for (int i = 2; i < HD / 8; i += 2) { a0 = _mm256_fmadd_ps(_mm256_loadu_ps(qj + 8 * i), k[i], a0); a1 = _mm256_fmadd_ps(_mm256_loadu_ps(qj + 8 * i + 8), k[i + 1], a1); }
+        __m256 a = _mm256_add_ps(a0, a1); __m128 h = _mm_add_ps(_mm256_castps256_ps128(a), _mm256_extractf128_ps(a, 1));
+        h = _mm_add_ps(h, _mm_movehl_ps(h, h)); h = _mm_add_ss(h, _mm_shuffle_ps(h, h, 1));
+        sc[(size_t)j * C + (t - t0)] = _mm_cvtss_f32(h) * scl;
+      }
+    }
+  }
+  // out_j += p_j(t) * V[t] for the rep heads of group g (out rows pstride apart)
+  template <int HD> void values_tpl(const uint16_t *vl, int g, int rep, int t0, int t1, int C, const float *sc, float *out, size_t pstride) const {
+    for (int t = t0; t < t1; t++) {
+      const uint16_t *vv = vl + (size_t)t * kvd_ + g * HD; __m256 v[HD / 8];
+      for (int i = 0; i < HD / 8; i++) v[i] = _mm256_cvtph_ps(_mm_loadu_si128((const __m128i *)(vv + 8 * i)));
+      for (int j = 0; j < rep; j++) {
+        const __m256 w = _mm256_set1_ps(sc[(size_t)j * C + (t - t0)]); float *o = out + j * pstride;
+        for (int i = 0; i < HD / 8; i++) _mm256_storeu_ps(o + 8 * i, _mm256_fmadd_ps(w, v[i], _mm256_loadu_ps(o + 8 * i)));
+      }
+    }
+  }
+  // attention of one token over cache positions [0, T): work items = (kv group, chunk of 64 positions); the query heads
+  // of a group share each converted K / V row; chunks are merged in a fixed order (same result for any thread count)
+  void attend(const uint16_t *kl, const uint16_t *vl, const float *q, int T, float *out) {
+    const int C = 64, nc = (T + C - 1) / C, rep = nh_ / nkv_, hd = hd_; const float scl = 1.f / std::sqrt((float)hd);
+    if (part_.size() < (size_t)nh_ * nc * (hd + 2)) part_.resize((size_t)nh_ * nc * (hd + 2));
+    auto item = [&](int w0, int w1) {
+      std::vector<float> sc((size_t)rep * C), kv(hd);
+      for (int w = w0; w < w1; w++) {
+        const int g = w / nc, c = w % nc, t0 = c * C, t1 = std::min(T, t0 + C), n = t1 - t0;
+        if (hd == 64) scores_tpl<64>(kl, q, g, rep, t0, t1, C, scl, sc.data());
+        else if (hd == 128) scores_tpl<128>(kl, q, g, rep, t0, t1, C, scl, sc.data());
+        else for (int t = t0; t < t1; t++) {
+          const uint16_t *kk = kl + (size_t)t * kvd_ + g * hd; f16_row(kk, kv.data(), hd);
+          for (int j = 0; j < rep; j++) sc[(size_t)j * C + (t - t0)] = dot_f32(q + (g * rep + j) * hd, kv.data(), hd) * scl;
+        }
+        for (int j = 0; j < rep; j++) {
+          float *sj = sc.data() + (size_t)j * C; float mx = -1e30f; for (int t = 0; t < n; t++) mx = std::max(mx, sj[t]);
+          for (int t = 0; t < n; t++) sj[t] -= mx;
+          exp_v(sj, sj, n); float sum = 0; for (int t = 0; t < n; t++) sum += sj[t];
+          float *pp = part_.data() + ((size_t)(g * rep + j) * nc + c) * (hd + 2); pp[0] = mx; pp[1] = sum; std::fill(pp + 2, pp + 2 + hd, 0.f);
+        }
+        float *pg = part_.data() + ((size_t)(g * rep) * nc + c) * (hd + 2) + 2; const size_t pstride = (size_t)nc * (hd + 2);
+        if (hd == 64) values_tpl<64>(vl, g, rep, t0, t1, C, sc.data(), pg, pstride);
+        else if (hd == 128) values_tpl<128>(vl, g, rep, t0, t1, C, sc.data(), pg, pstride);
+        else for (int t = t0; t < t1; t++) {
+          const uint16_t *vv = vl + (size_t)t * kvd_ + g * hd; f16_row(vv, kv.data(), hd);
+          for (int j = 0; j < rep; j++) axpy_f32(sc[(size_t)j * C + (t - t0)], kv.data(), pg + j * pstride, hd);
+        }
+      }
+    };
+    const int items = nkv_ * nc;
+    if (items > 1 && (int64_t)T * nh_ * hd > attn_par_min_) pool().parallel_for(items, item, 1); else item(0, items);
+    for (int h = 0; h < nh_; h++) {   // merge the chunks: softmax over all positions
+      const float *ph = part_.data() + (size_t)h * nc * (hd + 2); float M = -1e30f; for (int c = 0; c < nc; c++) M = std::max(M, ph[(size_t)c * (hd + 2)]);
+      float *o = out + h * hd; std::fill(o, o + hd, 0.f); float L = 0;
+      for (int c = 0; c < nc; c++) { const float *pc = ph + (size_t)c * (hd + 2); const float f = std::exp(pc[0] - M); L += pc[1] * f; axpy_f32(f, pc + 2, o, hd); }
+      const float il = 1.f / L; for (int i = 0; i < hd; i++) o[i] *= il;
+    }
+  }
+
   const float *step(int tok, int want) override {
     if (pos_ >= ctx_) throw std::runtime_error("context window full (" + std::to_string(ctx_) + " tokens)");
     if (tok < 0 || tok >= V_) throw std::runtime_error("token id out of range");
     row_f32(*embed_, tok, x_.data());
-    const int half = hd_ / 2, rep = nh_ / nkv_, T = pos_ + 1;
+    const int half = hd_ / 2, T = pos_ + 1;
     std::vector<float> cs(half), sn(half);
     for (int i = 0; i < half; i++) { double a = pos_ * inv_[i]; cs[i] = (float)std::cos(a); sn[i] = (float)std::sin(a); }
     auto rope = [&](float *vec) { for (int i = 0; i < half; i++) { float a = vec[i], b = vec[i + half]; vec[i] = a * cs[i] - b * sn[i]; vec[i + half] = b * cs[i] + a * sn[i]; } };
-    const float scl = 1.f / std::sqrt((float)hd_);
     for (int l = 0; l < L_; l++) {
       const Layer &ly = layers_[l];
       rmsnorm(x_.data(), ly.an->f32(), d_, eps_, xn_.data());
@@ -143,18 +216,7 @@ class Llama : public Model {
       for (int g = 0; g < nkv_; g++) rope(k_.data() + g * hd_);
       uint16_t *kl = kc_.data() + (size_t)l * ctx_ * kvd_, *vl = vc_.data() + (size_t)l * ctx_ * kvd_;
       to_f16(k_.data(), kl + (size_t)pos_ * kvd_, kvd_); to_f16(v_.data(), vl + (size_t)pos_ * kvd_, kvd_);
-      auto head = [&](int h0, int h1) {
-        std::vector<float> sc(T);
-        for (int h = h0; h < h1; h++) {
-          const float *qh = q_.data() + h * hd_; const int g = h / rep; float mx = -1e30f;
-          for (int t = 0; t < T; t++) { const uint16_t *kk = kl + (size_t)t * kvd_ + g * hd_; float s = dot_f16(qh, kk, hd_); s *= scl; sc[t] = s; mx = std::max(mx, s); }
-          float sum = 0; for (int t = 0; t < T; t++) sc[t] -= mx;
-          exp_v(sc.data(), sc.data(), T); for (int t = 0; t < T; t++) sum += sc[t];
-          float *out = att_.data() + h * hd_; std::fill(out, out + hd_, 0.f); const float inv = 1.f / sum;
-          for (int t = 0; t < T; t++) { const uint16_t *vv = vl + (size_t)t * kvd_ + g * hd_; axpy_f16(sc[t] * inv, vv, out, hd_); }
-        }
-      };
-      if ((int64_t)T * nh_ * hd_ > (1 << 15)) pool().parallel_for(nh_, head, 1); else head(0, nh_);
+      { const auto ta = std::chrono::steady_clock::now(); attend(kl, vl, q_.data(), T, att_.data()); g_attn_s += std::chrono::duration<double>(std::chrono::steady_clock::now() - ta).count(); }
       matvec(*ly.wo, att_.data(), o_.data(), d_, nh_ * hd_);
       for (int i = 0; i < d_; i++) x_[i] += o_[i];
       rmsnorm(x_.data(), ly.fn->f32(), d_, eps_, xn_.data());
@@ -175,6 +237,10 @@ class Llama : public Model {
  private:
   const bool debug_ = getenv("QPACK_DEBUG") != nullptr;
   float *all_logits_ = nullptr;
+  std::vector<float> part_;   // attention partials: per head and chunk [max, sum, out(hd)]
+  // decode attention runs on one thread below this many q x k products (~1170 positions for 14 heads x 64): measured
+  // faster here than the pool round trip; QPACK_ATTN_PAR overrides
+  const int64_t attn_par_min_ = getenv("QPACK_ATTN_PAR") ? atoll(getenv("QPACK_ATTN_PAR")) : (1 << 20);
   int d_, L_, nh_, nkv_, hd_, ff_, V_, ctx_, kvd_, pos_ = 0; float eps_; double theta_; bool tie_;
   const Tensor *embed_, *head_, *fnorm_; std::vector<Layer> layers_;
   std::vector<uint16_t> kc_, vc_;

@@ -89,22 +89,45 @@ compares): Q8_0 +0.0% / +0.2%, Q4_0 (330 MiB) +14.4% / +14.3%, Q4_K_M (374 MiB) 
 
 ## Speed
 
-Xeon E5-2683 v4 (AVX2, no AVX-512); prompt = `pp` (64 tokens for Qwen, 128 for N-Q), generation = `tg`, tok/s at
-1 / 8 / 16 threads (`qpack-bench`, `llama-bench`):
+Xeon E5-2683 v4 (AVX2, no AVX-512, a shared 64-vCPU VM), `qpack-bench -p 64 -n 128` / `llama-bench -p 64 -n 128`,
+tok/s at 1 / 8 / 16 threads:
 
 | model | file | MiB | prompt tok/s | generation tok/s |
 |---|---|---|---|---|
-| N-Q-26M-Chat | q8 | 46.5 | 177 / 823 / 1212 | 151 / 426 / 411 |
-| N-Q-26M-Chat | q4 | 29.5 | 363 / 1192 / 1492 | 305 / 503 / 428 |
-| Qwen2.5-0.5B | qpack q8 | 480 | 46 / 242 / 454 | 14.0 / 55.0 / 56.7 |
-| Qwen2.5-0.5B | qpack q4 | 329 | 34 / 207 / 367 | 18.7 / 73.5 / 81.8 |
-| Qwen2.5-0.5B | qpack q4m | 352 | 37 / 221 / 385 | 19.3 / 69.4 / 77.8 |
-| Qwen2.5-0.5B | llama.cpp Q8_0 | 501 | 43 / 309 / 525 | 11.3 / 50.8 / 46.0 |
-| Qwen2.5-0.5B | llama.cpp Q4_0 | 330 | 68 / 421 / 709 | 19.4 / 79.1 / 84.3 |
-| Qwen2.5-0.5B | llama.cpp Q4_K_M | 374 | 39 / 263 / 437 | 14.4 / 63.1 / 67.9 |
+| N-Q-26M-Chat | q8 | 46.5 | 183 / 958 / 1513 | 151 / 511 / 551 |
+| N-Q-26M-Chat | q4 (GPTQ) | 29.5 | 406 / 1563 / 2152 | 355 / 667 / 572 |
+| Qwen2.5-0.5B | qpack q8 | 480 | 54 / 321 / 584 | 17.3 / 63.4 / 65.8 |
+| Qwen2.5-0.5B | qpack q4 | 329 | 38 / 233 / 397 | 19.6 / 78.6 / 95.7 |
+| Qwen2.5-0.5B | qpack q4m | 352 | 40 / 247 / 450 | 19.7 / 79.4 / 96.1 |
+| Qwen2.5-0.5B | qpack q4 + q4 head (`--q4-head`) | 272 | 36 / 239 / 431 | 18.7 / 85.2 / 105.1 |
+| Qwen2.5-0.5B | llama.cpp Q8_0 | 501 | 52 / 303 / 534 | 13.2 / 53.5 / 47.7 |
+| Qwen2.5-0.5B | llama.cpp Q4_0 | 330 | 71 / 415 / 726 | 19.8 / 77.5 / 82.9 |
+| Qwen2.5-0.5B | llama.cpp Q4_K_M | 374 | 43 / 251 / 455 | 15.9 / 65.5 / 72.9 |
 
-Generation is on par with or faster than llama.cpp at equal bits; prompt processing still trails Q4_0 (llama.cpp
-multiplies int8 activations, qpack keeps int16 activations for accuracy).
+Generation is faster than llama.cpp at equal size: q8 +23-38%, q4 vs Q4_0 +1-15%, q4m vs Q4_K_M +21-32%. What made
+the decode step faster: per-thread completion flags in the pool instead of one contended counter, one pass for q/k/v
+and for gate/up (one activation quantisation, one barrier), q4 group scales converted per row with F16C instead of per
+group, AVX2 `exp` for SiLU / sigmoid / softmax, a top-k sampler that scans the 150k logits with SIMD compares instead
+of sorting them, and decode attention whose query heads of a KV group share each converted K / V row. For a model as
+small as N-Q-26M, 8 threads beat 16 (the step is ~1.5 ms, synchronisation dominates). Prompt processing still trails
+Q4_0 (llama.cpp multiplies int8 activations; qpack keeps int16 activations for accuracy).
+
+### Speculative decoding
+
+```bash
+build/qpack-cli -m model.qpack --lookup 15                          # prompt lookup: draft = continuation of the last n-gram seen earlier
+build/qpack-cli -m model.qpack --draft small.qpack --draft-k 4      # draft model with the same tokenizer
+build/qpack-server -m model.qpack --lookup 15                       # same flags; usage reports draft_tokens / draft_accepted
+build/qpack-bench -m model.qpack -t 16 --spec prompt.txt            # adds plain vs lookup chat columns
+```
+
+Drafted tokens are checked in one batched pass of the model; the draft length adapts (doubled after a fully accepted
+pass, cut after a rejection). Verification and the replay after a rejection run with kernels that are bit-identical to
+the single-token path, so greedy output is exactly the plain output (checked: `identical yes` in `bench/spec_bench`),
+and sampling uses the standard acceptance rule (accept with p(token), otherwise draw from p without it), which keeps
+the distribution. Qwen2.5-0.5B q4, 16 threads, greedy: rewriting a function 84 → 156 tok/s (×1.87), a free-form
+answer 88 → 97 tok/s (×1.09). It pays off for models that are bound by memory bandwidth (hundreds of MB and up);
+N-Q-26M is so small that the extra work outweighs the saved weight reads, so it is off by default.
 
 ## Tests
 
