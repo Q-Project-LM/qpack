@@ -1,6 +1,5 @@
 #include <algorithm>
 #include <cmath>
-#include <immintrin.h>
 
 #include "qpack/engine.h"
 
@@ -8,7 +7,7 @@ namespace qp {
 
 Sampler::Sampler(const SamplerParams &p) : p_(p), rng_(p.seed ? p.seed : std::random_device{}()) {}
 
-// the M largest logits (index, value), unordered: AVX2 scan against a running threshold, so only a few hundred of the
+// the M largest logits (index, value), unordered: SIMD scan against a running threshold, so only a few hundred of the
 // ~150k entries are ever compared one by one
 static void top_m(const float *x, int V, int M, std::vector<std::pair<int, float>> &out) {
   out.clear();
@@ -20,15 +19,10 @@ static void top_m(const float *x, int V, int M, std::vector<std::pair<int, float
   const int init = std::min(V, 4 * M + 8);
   for (int v = 0; v < init; v++) out.push_back({v, x[v]});
   float thr = shrink();
-  int v = init;
-  for (; v < V && (v & 7); v++) if (x[v] > thr) out.push_back({v, x[v]});
-  __m256 t8 = _mm256_set1_ps(thr);
-  for (; v + 8 <= V; v += 8) {
-    int mask = _mm256_movemask_ps(_mm256_cmp_ps(_mm256_loadu_ps(x + v), t8, _CMP_GT_OQ));
-    while (mask) { const int j = __builtin_ctz(mask); mask &= mask - 1; out.push_back({v + j, x[v + j]}); }
-    if ((int)out.size() > 4 * M) { thr = shrink(); t8 = _mm256_set1_ps(thr); }
+  for (int v = init; v < V; v += 4096) {
+    scan_gt(x, v, std::min(V, v + 4096), thr, out);
+    if ((int)out.size() > 4 * M) thr = shrink();
   }
-  for (; v < V; v++) if (x[v] > thr) out.push_back({v, x[v]});
   if ((int)out.size() > M) shrink();
 }
 

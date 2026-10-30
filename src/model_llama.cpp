@@ -5,7 +5,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <immintrin.h>
 #include <stdexcept>
 
 #include "qpack/qpack.h"
@@ -130,35 +129,6 @@ class Llama : public Model {
     return logits_.data();
   }
 
-  static void f16_row(const uint16_t *h, float *f, int n) {
-    int i = 0; for (; i + 8 <= n; i += 8) _mm256_storeu_ps(f + i, _mm256_cvtph_ps(_mm_loadu_si128((const __m128i *)(h + i))));
-    for (; i < n; i++) f[i] = _cvtsh_ss(h[i]);
-  }
-  // scores of the rep query heads of kv group g against positions [t0, t1): the K row stays in registers
-  template <int HD> void scores_tpl(const uint16_t *kl, const float *q, int g, int rep, int t0, int t1, int C, float scl, float *sc) const {
-    for (int t = t0; t < t1; t++) {
-      const uint16_t *kk = kl + (size_t)t * kvd_ + g * HD; __m256 k[HD / 8];
-      for (int i = 0; i < HD / 8; i++) k[i] = _mm256_cvtph_ps(_mm_loadu_si128((const __m128i *)(kk + 8 * i)));
-      for (int j = 0; j < rep; j++) {
-        const float *qj = q + (g * rep + j) * HD; __m256 a0 = _mm256_mul_ps(_mm256_loadu_ps(qj), k[0]), a1 = _mm256_mul_ps(_mm256_loadu_ps(qj + 8), k[1]);
-        for (int i = 2; i < HD / 8; i += 2) { a0 = _mm256_fmadd_ps(_mm256_loadu_ps(qj + 8 * i), k[i], a0); a1 = _mm256_fmadd_ps(_mm256_loadu_ps(qj + 8 * i + 8), k[i + 1], a1); }
-        __m256 a = _mm256_add_ps(a0, a1); __m128 h = _mm_add_ps(_mm256_castps256_ps128(a), _mm256_extractf128_ps(a, 1));
-        h = _mm_add_ps(h, _mm_movehl_ps(h, h)); h = _mm_add_ss(h, _mm_shuffle_ps(h, h, 1));
-        sc[(size_t)j * C + (t - t0)] = _mm_cvtss_f32(h) * scl;
-      }
-    }
-  }
-  // out_j += p_j(t) * V[t] for the rep heads of group g (out rows pstride apart)
-  template <int HD> void values_tpl(const uint16_t *vl, int g, int rep, int t0, int t1, int C, const float *sc, float *out, size_t pstride) const {
-    for (int t = t0; t < t1; t++) {
-      const uint16_t *vv = vl + (size_t)t * kvd_ + g * HD; __m256 v[HD / 8];
-      for (int i = 0; i < HD / 8; i++) v[i] = _mm256_cvtph_ps(_mm_loadu_si128((const __m128i *)(vv + 8 * i)));
-      for (int j = 0; j < rep; j++) {
-        const __m256 w = _mm256_set1_ps(sc[(size_t)j * C + (t - t0)]); float *o = out + j * pstride;
-        for (int i = 0; i < HD / 8; i++) _mm256_storeu_ps(o + 8 * i, _mm256_fmadd_ps(w, v[i], _mm256_loadu_ps(o + 8 * i)));
-      }
-    }
-  }
   // attention of one token over cache positions [0, T): work items = (kv group, chunk of 64 positions); the query heads
   // of a group share each converted K / V row; chunks are merged in a fixed order (same result for any thread count)
   void attend(const uint16_t *kl, const uint16_t *vl, const float *q, int T, float *out) {
@@ -168,10 +138,8 @@ class Llama : public Model {
       std::vector<float> sc((size_t)rep * C), kv(hd);
       for (int w = w0; w < w1; w++) {
         const int g = w / nc, c = w % nc, t0 = c * C, t1 = std::min(T, t0 + C), n = t1 - t0;
-        if (hd == 64) scores_tpl<64>(kl, q, g, rep, t0, t1, C, scl, sc.data());
-        else if (hd == 128) scores_tpl<128>(kl, q, g, rep, t0, t1, C, scl, sc.data());
-        else for (int t = t0; t < t1; t++) {
-          const uint16_t *kk = kl + (size_t)t * kvd_ + g * hd; f16_row(kk, kv.data(), hd);
+        if (!attn_scores(kl, kvd_, q, g, rep, hd, t0, t1, C, scl, sc.data())) for (int t = t0; t < t1; t++) {
+          const uint16_t *kk = kl + (size_t)t * kvd_ + g * hd; f16_to_f32_v(kk, kv.data(), hd);
           for (int j = 0; j < rep; j++) sc[(size_t)j * C + (t - t0)] = dot_f32(q + (g * rep + j) * hd, kv.data(), hd) * scl;
         }
         for (int j = 0; j < rep; j++) {
@@ -181,10 +149,8 @@ class Llama : public Model {
           float *pp = part_.data() + ((size_t)(g * rep + j) * nc + c) * (hd + 2); pp[0] = mx; pp[1] = sum; std::fill(pp + 2, pp + 2 + hd, 0.f);
         }
         float *pg = part_.data() + ((size_t)(g * rep) * nc + c) * (hd + 2) + 2; const size_t pstride = (size_t)nc * (hd + 2);
-        if (hd == 64) values_tpl<64>(vl, g, rep, t0, t1, C, sc.data(), pg, pstride);
-        else if (hd == 128) values_tpl<128>(vl, g, rep, t0, t1, C, sc.data(), pg, pstride);
-        else for (int t = t0; t < t1; t++) {
-          const uint16_t *vv = vl + (size_t)t * kvd_ + g * hd; f16_row(vv, kv.data(), hd);
+        if (!attn_values(vl, kvd_, g, rep, hd, t0, t1, C, sc.data(), pg, pstride)) for (int t = t0; t < t1; t++) {
+          const uint16_t *vv = vl + (size_t)t * kvd_ + g * hd; f16_to_f32_v(vv, kv.data(), hd);
           for (int j = 0; j < rep; j++) axpy_f32(sc[(size_t)j * C + (t - t0)], kv.data(), pg + j * pstride, hd);
         }
       }
@@ -256,6 +222,7 @@ std::unique_ptr<Model> load_model(const std::string &path, int max_ctx) {
   auto c = std::make_shared<Container>(path);
   const std::string arch = c->config()["arch"].as_str(), mt = c->config()["model_type"].as_str();
   if (arch == "llama") return make_llama(c, max_ctx);
+  if (arch == "lfm3") return make_lfm3(c, max_ctx);
   if (mt == "nq4") return make_nq(c, max_ctx);
   throw std::runtime_error("unsupported model in " + path + " (arch='" + arch + "', model_type='" + mt + "')");
 }

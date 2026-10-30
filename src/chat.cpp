@@ -14,6 +14,16 @@ ChatFormat::ChatFormat(const Json &cfg, const Tokenizer &tok) {
   if (cfg["model_type"].as_str() == "nq4" || tok.token_id("<MODEL>") >= 0) name_ = "nq";
   else if (cfg["chat_format"].as_str() == "chatml" || tok.token_id("<|im_start|>") >= 0) name_ = "chatml";
   else name_ = "raw";
+  // templates that open with {{ bos_token }} (MiniCPM, Llama 3, ...): the model expects the BOS token in front of the conversation
+  if (name_ == "chatml" && tmpl.compare(0, 2, "{{") == 0 && tmpl.substr(0, 24).find("bos_token") != std::string::npos) {
+    const Json &b = cfg["bos_token_id"]; const int id = b.is_null() ? -1 : (int)b.as_int(-1);
+    if (id >= 0 && tok.is_special(id)) bos_ = tok.piece(id);
+  }
+  // hybrid-reasoning templates (MiniCPM5, LFM3): what the template appends after "assistant\n" with enable_thinking off / on
+  if (name_ == "chatml" && tok.token_id("<think>") >= 0 && tmpl.find("enable_thinking") != std::string::npos) {
+    if (tmpl.find("<think>\\n\\n</think>\\n\\n") != std::string::npos) { think_off_ = "<think>\n\n</think>\n\n"; think_on_ = "<think>\n"; }
+    else if (tmpl.find("<think></think>") != std::string::npos) { think_off_ = "<think></think>"; think_on_ = "<think>"; }
+  }
   const std::string qwen = "You are Qwen, created by Alibaba Cloud. You are a helpful assistant.";
   if (tmpl.find(qwen) != std::string::npos) default_system_ = qwen;
   auto add = [&](int id) { if (id >= 0 && !is_stop(id)) stop_.push_back(id); };
@@ -40,9 +50,10 @@ std::string ChatFormat::render(const std::vector<Message> &msgs, bool gen, bool 
     return o;
   }
   if (name_ == "chatml") {
+    o = bos_;
     if (!default_system_.empty() && (msgs.empty() || msgs[0].role != "system")) o += "<|im_start|>system\n" + default_system_ + "<|im_end|>\n";
     for (auto &m : msgs) o += "<|im_start|>" + m.role + "\n" + m.content + "<|im_end|>\n";
-    if (gen) o += "<|im_start|>assistant\n";
+    if (gen) { o += "<|im_start|>assistant\n"; o += think ? think_on_ : think_off_; }
     return o;
   }
   for (auto &m : msgs) o += m.content + "\n";

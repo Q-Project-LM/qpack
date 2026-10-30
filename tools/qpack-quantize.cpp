@@ -3,8 +3,6 @@
 // of 32. The q4 scale of every group is picked by minimum squared error over a grid of candidates plus a least-squares
 // refit. The self-test is recomputed on the dequantised model, so it checks the q4 kernels, not the rounding.
 // usage: qpack-quantize in.qpack out.qpack [--type q4|q4m|q8] [--keep-q8 name,name,...] [-t threads]
-#include <immintrin.h>
-
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -26,8 +24,8 @@ using qp::Json;
 
 namespace {
 
-uint16_t to_f16(float x) { return _cvtss_sh(x, 0); }
-float from_f16(uint16_t h) { return _cvtsh_ss(h); }
+uint16_t to_f16(float x) { return qp::f32_to_f16(x); }
+float from_f16(uint16_t h) { return qp::f16_to_f32(h); }
 
 // one group of 32 weights -> 16 bytes + fp16 scale, minimum squared error weighted by imp (importance of each input
 // column: mean squared activation from calibration text, or 1)
@@ -182,7 +180,7 @@ void gptq_q4(const qp::Tensor &t, const std::vector<float> &Hf, uint8_t *q, uint
           for (int r = 0; r < nr; r++) {
             float gw[32]; for (int c = 0; c < 32; c++) gw[c] = w[(size_t)r * n + pos[32 * g + c]];
             uint8_t tmp[16]; uint16_t h; q4_group(gw, imp.data() + 32 * g, tmp, &h);
-            sc[(size_t)(r0 + r) * G + g] = h; sg[(size_t)r * G + g] = _cvtsh_ss(h);
+            sc[(size_t)(r0 + r) * G + g] = h; sg[(size_t)r * G + g] = qp::f16_to_f32(h);
           }
         }
         const float *u = U.data() + (size_t)p * n; const float upp = u[p];

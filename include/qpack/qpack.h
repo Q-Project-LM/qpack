@@ -1,4 +1,4 @@
-// libqpack: load QPACK1/QPACK2 single-file models and run them on the CPU (AVX2/FMA, threads).
+// libqpack: load QPACK1/QPACK2 single-file models and run them on the CPU (AVX2/FMA or NEON, threads).
 //   Container  — mmap of a .qpack file: table of contents, manifest, tensors viewed in place (no copies).
 //   Tensor     — f32 / f16 / q8 (int8 rows + float32 per-row scale) / q4 (4-bit groups + fp16 scale) / i64, with matvec() kernels.
 //   Model      — one decode step at a time: Llama family (Llama, Qwen2, Mistral, SmolLM) and N-Q (Gated DeltaNet).
@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "qpack/json.h"
+#include "qpack/simd.h"
 
 namespace qp {
 
@@ -89,14 +90,22 @@ extern std::function<void(const Tensor &W, const float *X, int B, int ldx, int c
 // verification and replay must reproduce plain decoding exactly); otherwise the faster tiled kernels are used
 extern thread_local bool g_exact_batches;
 struct ExactBatches { bool old; ExactBatches() : old(g_exact_batches) { g_exact_batches = true; } ~ExactBatches() { g_exact_batches = old; } };
-void exp_v(const float *x, float *y, int n);                 // AVX2 elementwise (rel. error ~2e-7)
+void exp_v(const float *x, float *y, int n);                 // SIMD elementwise (rel. error ~2e-7)
 void sigmoid_v(const float *x, float *y, int n);
 void silu_mul(float *g, const float *u, int n);             // g = silu(g) * u
-float dot_f32(const float *a, const float *b, int n);           // AVX2 helpers for attention
+float dot_f32(const float *a, const float *b, int n);           // SIMD helpers for attention
 void axpy_f32(float a, const float *x, float *y, int n);      // y += a x
 void to_f16(const float *x, uint16_t *y, int n);                // fp16 KV cache
 float dot_f16(const float *a, const uint16_t *b, int n);
 void axpy_f16(float a, const uint16_t *x, float *y, int n);
+void f16_to_f32_v(const uint16_t *h, float *f, int n);
+// decode attention helpers for head_dim 64 / 128 (false = unsupported head_dim, the caller falls back to dot_f32 / axpy_f32).
+// scores: sc[j * C + (t - t0)] = scl * q_(g*rep+j) . K[t] for the rep query heads of kv group g and positions [t0, t1)
+bool attn_scores(const uint16_t *kl, size_t kvd, const float *q, int g, int rep, int hd, int t0, int t1, int C, float scl, float *sc);
+// values: out_j += sc[j * C + (t - t0)] * V[t] (out rows pstride floats apart)
+bool attn_values(const uint16_t *vl, size_t kvd, int g, int rep, int hd, int t0, int t1, int C, const float *sc, float *out, size_t pstride);
+// appends (i, x[i]) for every i in [from, to) with x[i] > thr, in increasing i (sampler top-k scan)
+void scan_gt(const float *x, int from, int to, float thr, std::vector<std::pair<int, float>> &out);
 void rmsnorm(const float *x, const float *w, int n, float eps, float *out, bool zero_centred = false);
 
 // ------------------------------------------------------------------ models
@@ -138,6 +147,7 @@ class Model {
 // opens any supported .qpack; max_ctx = 0 picks a default (4096, or the model's limit if smaller)
 std::unique_ptr<Model> load_model(const std::string &path, int max_ctx = 0);
 std::unique_ptr<Model> make_llama(std::shared_ptr<Container> c, int max_ctx);
+std::unique_ptr<Model> make_lfm3(std::shared_ptr<Container> c, int max_ctx);
 std::unique_ptr<Model> make_nq(std::shared_ptr<Container> c, int max_ctx);
 
 // self-test stored in the container: top-1 must match and the top-5 logits must agree within tol

@@ -7,9 +7,10 @@ Single-file model format and a small C++ inference engine in the spirit of llama
   float32 scale per row / i64), `config.json`, `tokenizer.json` and a built-in `selftest.json` (token ids → reference
   logits), see [QPACK2.md](QPACK2.md).
 * **Models.** N-Q (Gated DeltaNet + gated attention, Gated Residual, n-gram PLE, exact `<CALC>` circuits) and the
-  Llama family (Llama, Qwen2, Mistral, SmolLM: RMSNorm, RoPE, GQA, optional q/k/v bias, SwiGLU, tied or untied head).
-* **Engine.** C++17, no dependencies: AVX2/FMA/F16C kernels (int8 / int4 weights × int16 activations via `madd`,
-  batched matrix × matrix for prompts), fp16 KV cache, a spinning thread pool,
+  Llama family (Llama, Qwen2, Mistral, SmolLM, MiniCPM5: RMSNorm, RoPE, GQA, optional q/k/v bias, SwiGLU, tied or untied head),
+  and Liquid LFM3 (gated short-convolution + gated attention hybrid, `src/model_lfm.cpp`).
+* **Engine.** C++17, no dependencies: AVX2/FMA/F16C kernels on x86-64 and NEON kernels on AArch64 (Apple Silicon, Android, watches;
+  int8 / int4 weights × int16 activations via `madd` / `sdot`, batched matrix × matrix for prompts), fp16 KV cache, a spinning thread pool,
   byte-level BPE tokenizer read from `tokenizer.json` (regex pre-tokenizers, NFC, added tokens), sampler (temperature,
   top-k, top-p, min-p, repetition penalty), chat formats (ChatML, N-Q), KV-cache / state reuse across requests.
 
@@ -19,7 +20,8 @@ Single-file model format and a small C++ inference engine in the spirit of llama
 cmake -S . -B build && cmake --build build -j
 ```
 
-`-DQPACK_NATIVE=OFF` builds without `-march=native` (the kernels still need AVX2 + FMA + F16C).
+`-DQPACK_NATIVE=OFF` builds without `-march=native` (x86-64 still needs AVX2 + FMA + F16C; AArch64 gets `-march=armv8.2-a+dotprod+fp16`).
+`-DQPACK_SIZE_OPT=ON` compiles everything except the kernels with `-Os` + LTO + section GC.
 
 ## Run
 
@@ -44,7 +46,18 @@ Server endpoints: `POST /v1/chat/completions` (`messages`, `max_tokens`, `temper
 `reasoning_content`, circuit results (`<CALC>347*86<EQ>29842<ECALC>`) are shown as `347*86 = 29842`, and `usage`
 reports `circuit_calls`.
 
+## Android / Wear OS
+
+`android/` is a Gradle project: `:qpack` (JNI + Kotlin API `ai.qproject.qpack.QPack`, builds the engine with the NDK for `arm64-v8a`) and
+`:phone` (Q Chat: a phone chat app with streaming replies, model picker, optional voice in/out and a reasoning switch; models go to `Android/data/ai.qproject.chat/files/models/` or are picked with the file chooser) and
+`:wear` (a Wear OS sample: `SpeechRecognizer` -> QPack -> `TextToSpeech`, sentence by sentence, all on the device). Models are `.qpack` files
+(mmap'd); put one at `files/model.qpack` of the app: `adb push model.q4.qpack /data/local/tmp/ && adb shell run-as ai.qproject.wear cp /data/local/tmp/model.q4.qpack files/model.qpack`.
+Command line tools for a device without the app: `cmake -S . -B build-android -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-26`.
+Hybrid-reasoning chats (MiniCPM5, LFM3) answer without `<think>` by default (`--think` / `"think": true` turns reasoning on).
+
 ## Convert a model
+
+Without torch: `cd python && python -m qpack.convert_np models/<hf folder> out.f32.qpack` (Llama family and LFM3; numpy only), then `qpack-quantize` below.
 
 ```bash
 pip install torch transformers numpy
