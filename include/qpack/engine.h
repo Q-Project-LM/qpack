@@ -55,7 +55,7 @@ class ChatFormat {
   // text shown for a generated token: N-Q control tokens become "<think>", "</think>", " = " (circuit result), ""
   std::string display(int id, const Tokenizer &tok) const;
  private:
-  std::string name_, default_system_; std::vector<int> stop_;
+  std::string name_, default_system_, bos_, think_off_, think_on_; std::vector<int> stop_;
   int think_ = -1, ethink_ = -1, eq_ = -1;
 };
 

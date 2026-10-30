@@ -1,5 +1,11 @@
+__pycache__/
+.cxx/
+.DS_Store
+*.gguf
+*.qpack
+android/.gradle/
+android/**/build/
+android/local.properties
 build*/
 models/
-__pycache__/
-*.qpack
-*.gguf
+release-dist/
