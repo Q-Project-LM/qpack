@@ -49,6 +49,7 @@ reports `circuit_calls`.
 ## Android / Wear OS
 
 `android/` is a Gradle project: `:qpack` (JNI + Kotlin API `ai.qproject.qpack.QPack`, builds the engine with the NDK for `arm64-v8a`) and
+`:phone` (Q Chat: a phone chat app with streaming replies, model picker, optional voice in/out and a reasoning switch; models go to `Android/data/ai.qproject.chat/files/models/` or are picked with the file chooser) and
 `:wear` (a Wear OS sample: `SpeechRecognizer` -> QPack -> `TextToSpeech`, sentence by sentence, all on the device). Models are `.qpack` files
 (mmap'd); put one at `files/model.qpack` of the app: `adb push model.q4.qpack /data/local/tmp/ && adb shell run-as ai.qproject.wear cp /data/local/tmp/model.q4.qpack files/model.qpack`.
 Command line tools for a device without the app: `cmake -S . -B build-android -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-26`.
