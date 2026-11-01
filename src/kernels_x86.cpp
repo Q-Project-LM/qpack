@@ -314,7 +314,7 @@ float dot_f32(const float *a, const float *b, int n) {
   __m256 s0 = _mm256_setzero_ps(), s1 = s0; int i = 0;
   for (; i + 16 <= n; i += 16) { s0 = _mm256_fmadd_ps(_mm256_loadu_ps(a + i), _mm256_loadu_ps(b + i), s0); s1 = _mm256_fmadd_ps(_mm256_loadu_ps(a + i + 8), _mm256_loadu_ps(b + i + 8), s1); }
   for (; i + 8 <= n; i += 8) s0 = _mm256_fmadd_ps(_mm256_loadu_ps(a + i), _mm256_loadu_ps(b + i), s0);
-  float s = hsum256(_mm256_add_ps(s0, s1)); for (; i < n; i++) s += a[i] * b[i];
+  float s = impl::hsum256(_mm256_add_ps(s0, s1)); for (; i < n; i++) s += a[i] * b[i];
   return s;
 }
 void axpy_f32(float a, const float *x, float *y, int n) {
@@ -334,7 +334,7 @@ float dot_f16(const float *a, const uint16_t *b, int n) {
     s1 = _mm256_fmadd_ps(_mm256_loadu_ps(a + i + 8), _mm256_cvtph_ps(_mm_loadu_si128((const __m128i *)(b + i + 8))), s1);
   }
   for (; i + 8 <= n; i += 8) s0 = _mm256_fmadd_ps(_mm256_loadu_ps(a + i), _mm256_cvtph_ps(_mm_loadu_si128((const __m128i *)(b + i))), s0);
-  float s = hsum256(_mm256_add_ps(s0, s1)); for (; i < n; i++) s += a[i] * _cvtsh_ss(b[i]);
+  float s = impl::hsum256(_mm256_add_ps(s0, s1)); for (; i < n; i++) s += a[i] * _cvtsh_ss(b[i]);
   return s;
 }
 void axpy_f16(float a, const uint16_t *x, float *y, int n) {
