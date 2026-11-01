@@ -49,3 +49,14 @@ Finished matrix-20261102-013404: 18/18 variants completed successfully; see SUMM
 
 ## Альтернативные слои q4m
 Комплементарное размещение q8 при равном размере улучшило extended RU/EN, но не все прежние метрики. Кандидат не внедрён. См. attempt-q4m-middle/SUMMARY.md.
+
+## q4m: первые или последние четыре слоя
+Оба варианта: размер 31582336 байт и selftest 5/5; сопоставление с прежним q4m: attempt-q4m-halves-results.json. Основной код не изменён до оценки результатов.
+
+## 2026-11-02T02:08:17.800848+03:00
+Started matrix-20261102-020806: 18 main configurations; separate RU/EN Wikipedia calibration and evaluation pages. Original f16 unchanged.
+
+Finished matrix-20261102-020806: 18/18 variants completed successfully; see SUMMARY.md and failure logs.
+
+## Экспериментальный q4m-last-half
+Режим встроен отдельным флагом. Для N-Q 8 слоёв все шесть PPL ниже q4m act-order при одинаковом размере 31582336 байт. Selftest 5/5; интегрированная версия совпала с прототипом по расширенной PPL. Старый q4m побайтно воспроизводится. Регрессия 18 режимов: research/matrix-20261102-020806/SUMMARY.md; все старые веса совпали по SHA256. Результат ограничен одной моделью и связанными текстами. Аудит: q4m-last-half-validation/AUDIT.json.

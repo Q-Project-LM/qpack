@@ -1,0 +1,177 @@
+[
+  {
+    "label": "invalid",
+    "args": [
+      "build/qpack-quantize",
+      "model.qpack",
+      "research/q4m-last-half-validation/invalid.qpack",
+      "--type",
+      "q4",
+      "--q4m-last-half"
+    ],
+    "code": 2,
+    "seconds": 0.003608226776123047
+  },
+  {
+    "label": "default-quantize",
+    "args": [
+      "build/qpack-quantize",
+      "model.qpack",
+      "research/q4m-last-half-validation/default.qpack",
+      "--type",
+      "q4m",
+      "--calib",
+      "research/matrix-20261102-003657/data/calib.txt",
+      "--calib-tokens",
+      "8192",
+      "--gptq",
+      "--act-order",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 49.06707429885864
+  },
+  {
+    "label": "candidate-quantize",
+    "args": [
+      "build/qpack-quantize",
+      "model.qpack",
+      "research/q4m-last-half-validation/candidate.qpack",
+      "--type",
+      "q4m",
+      "--calib",
+      "research/matrix-20261102-003657/data/calib.txt",
+      "--calib-tokens",
+      "8192",
+      "--gptq",
+      "--act-order",
+      "-t",
+      "8",
+      "--q4m-last-half"
+    ],
+    "code": 0,
+    "seconds": 48.968928813934326
+  },
+  {
+    "label": "selftest",
+    "args": [
+      "build/qpack-cli",
+      "-m",
+      "research/q4m-last-half-validation/candidate.qpack",
+      "--selftest",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 0.10954427719116211
+  },
+  {
+    "label": "candidate-extended-ru",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/q4m-last-half-validation/candidate.qpack",
+      "-f",
+      "research/extended-holdout/ru.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "20",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 9.338010549545288
+  },
+  {
+    "label": "candidate-extended-en",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/q4m-last-half-validation/candidate.qpack",
+      "-f",
+      "research/extended-holdout/en.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "20",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 9.853673458099365
+  },
+  {
+    "label": "candidate-bench",
+    "args": [
+      "build/qpack-bench",
+      "-m",
+      "research/q4m-last-half-validation/candidate.qpack",
+      "-p",
+      "64",
+      "-n",
+      "128",
+      "-t",
+      "1,8,16",
+      "-r",
+      "3"
+    ],
+    "code": 0,
+    "seconds": 3.282567024230957
+  },
+  {
+    "label": "reference-extended-ru",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/matrix-20261102-003657/artifacts/q4m-gptq-act-retry.qpack",
+      "-f",
+      "research/extended-holdout/ru.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "20",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 9.002815008163452
+  },
+  {
+    "label": "reference-extended-en",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/matrix-20261102-003657/artifacts/q4m-gptq-act-retry.qpack",
+      "-f",
+      "research/extended-holdout/en.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "20",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 9.79114842414856
+  },
+  {
+    "label": "reference-bench",
+    "args": [
+      "build/qpack-bench",
+      "-m",
+      "research/matrix-20261102-003657/artifacts/q4m-gptq-act-retry.qpack",
+      "-p",
+      "64",
+      "-n",
+      "128",
+      "-t",
+      "1,8,16",
+      "-r",
+      "3"
+    ],
+    "code": 0,
+    "seconds": 3.4111433029174805
+  }
+]

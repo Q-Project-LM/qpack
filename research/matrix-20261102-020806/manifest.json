@@ -1,0 +1,230 @@
+{
+  "created_moscow": "2026-11-02T02:08:17.800848+03:00",
+  "source": "model.qpack",
+  "source_bytes": 93736125,
+  "source_sha256": "1e22aafe3679970cdd136cbab1b99d60a3430f762d50a6ca69019391577d4c0c",
+  "commit": "fed9ec5dba00beb131a4ad036f3c750018f79d02",
+  "branch": "improve-quantization",
+  "platform": "Linux-6.8.0-146-generic-x86_64-with-glibc2.39",
+  "cpus": 64,
+  "plan": [
+    {
+      "name": "f16",
+      "flags": null
+    },
+    {
+      "name": "q8",
+      "flags": [
+        "--type",
+        "q8"
+      ]
+    },
+    {
+      "name": "q4-plain",
+      "flags": [
+        "--type",
+        "q4"
+      ]
+    },
+    {
+      "name": "q4-plain-head4",
+      "flags": [
+        "--type",
+        "q4",
+        "--q4-head"
+      ]
+    },
+    {
+      "name": "q4-calib",
+      "flags": [
+        "--type",
+        "q4",
+        "--calib",
+        "research/matrix-20261102-020806/data/calib.txt",
+        "--calib-tokens",
+        "8192"
+      ]
+    },
+    {
+      "name": "q4-calib-head4",
+      "flags": [
+        "--type",
+        "q4",
+        "--calib",
+        "research/matrix-20261102-020806/data/calib.txt",
+        "--calib-tokens",
+        "8192",
+        "--q4-head"
+      ]
+    },
+    {
+      "name": "q4-gptq",
+      "flags": [
+        "--type",
+        "q4",
+        "--calib",
+        "research/matrix-20261102-020806/data/calib.txt",
+        "--calib-tokens",
+        "8192",
+        "--gptq"
+      ]
+    },
+    {
+      "name": "q4-gptq-head4",
+      "flags": [
+        "--type",
+        "q4",
+        "--calib",
+        "research/matrix-20261102-020806/data/calib.txt",
+        "--calib-tokens",
+        "8192",
+        "--gptq",
+        "--q4-head"
+      ]
+    },
+    {
+      "name": "q4-gptq-act",
+      "flags": [
+        "--type",
+        "q4",
+        "--calib",
+        "research/matrix-20261102-020806/data/calib.txt",
+        "--calib-tokens",
+        "8192",
+        "--gptq",
+        "--act-order"
+      ]
+    },
+    {
+      "name": "q4-gptq-act-head4",
+      "flags": [
+        "--type",
+        "q4",
+        "--calib",
+        "research/matrix-20261102-020806/data/calib.txt",
+        "--calib-tokens",
+        "8192",
+        "--gptq",
+        "--act-order",
+        "--q4-head"
+      ]
+    },
+    {
+      "name": "q4m-plain",
+      "flags": [
+        "--type",
+        "q4m"
+      ]
+    },
+    {
+      "name": "q4m-plain-head4",
+      "flags": [
+        "--type",
+        "q4m",
+        "--q4-head"
+      ]
+    },
+    {
+      "name": "q4m-calib",
+      "flags": [
+        "--type",
+        "q4m",
+        "--calib",
+        "research/matrix-20261102-020806/data/calib.txt",
+        "--calib-tokens",
+        "8192"
+      ]
+    },
+    {
+      "name": "q4m-calib-head4",
+      "flags": [
+        "--type",
+        "q4m",
+        "--calib",
+        "research/matrix-20261102-020806/data/calib.txt",
+        "--calib-tokens",
+        "8192",
+        "--q4-head"
+      ]
+    },
+    {
+      "name": "q4m-gptq",
+      "flags": [
+        "--type",
+        "q4m",
+        "--calib",
+        "research/matrix-20261102-020806/data/calib.txt",
+        "--calib-tokens",
+        "8192",
+        "--gptq"
+      ]
+    },
+    {
+      "name": "q4m-gptq-head4",
+      "flags": [
+        "--type",
+        "q4m",
+        "--calib",
+        "research/matrix-20261102-020806/data/calib.txt",
+        "--calib-tokens",
+        "8192",
+        "--gptq",
+        "--q4-head"
+      ]
+    },
+    {
+      "name": "q4m-gptq-act",
+      "flags": [
+        "--type",
+        "q4m",
+        "--calib",
+        "research/matrix-20261102-020806/data/calib.txt",
+        "--calib-tokens",
+        "8192",
+        "--gptq",
+        "--act-order"
+      ]
+    },
+    {
+      "name": "q4m-gptq-act-head4",
+      "flags": [
+        "--type",
+        "q4m",
+        "--calib",
+        "research/matrix-20261102-020806/data/calib.txt",
+        "--calib-tokens",
+        "8192",
+        "--gptq",
+        "--act-order",
+        "--q4-head"
+      ]
+    }
+  ],
+  "calibration_token_cap": 8192,
+  "evaluation": "Separate Wikipedia topics; ctx=256, up to 8 chunks per language, 8 threads. Public snapshots; not a broad benchmark. Existing pilot texts additionally checked.",
+  "benchmark": "Synthetic prompt64/decode128; threads1,8,16; 3 repetitions; independent best-of-3 phase rates.",
+  "script_sha256": "d027b14efb7c570c1a67821e86e7937c6d33c5bf9cdc5169742c63d5a61f0328",
+  "binary_sha256": {
+    "qpack-cli": "70950fc2c2aac4197b1daae772483d075a678cb66f9d4144c4c6ca45847a1842",
+    "qpack-quantize": "00ed0e1f881fb1e02e778e145a12fc0468a603086ac4dead1aec1e8b52f318b9",
+    "qpack-bench": "072251f5556a08b2be235913595a93c7d66d8852bbbce2d524ed26b3dc2513e3",
+    "qpack-perplexity": "767dd9559c6ca74160863ee217333ec8dbe0383c91c74f900b1f062d128436e2"
+  },
+  "data_sha256": {
+    "ru-910.txt": "9896eee4b237be8ba0e31ffb6de81c6be4b6fa359ba95a003348ea30a7df65c6",
+    "eval-ru.txt": "55e8f2309d32805009131dd48b1424ab34fca58c578b3321c293e495d86b0dcc",
+    "en-7878457.txt": "ca8d5ca5cf260a825082ae7fa89c07523e892c3abde4d6348c5096b56f9229d8",
+    "ru-812.txt": "267d81df80d18c76eabcdc5277ecc816ac6e5bf1b08550dbed75a9f2f3f970c3",
+    "ru-588.txt": "b4312e27556a3df1b73744f532c68352489004938efc258b51673934feddbb0e",
+    "eval-en.txt": "c97045cbe206ac41a926ed2de281e85590d20c240332debee43f4c555f8b9a74",
+    "en-10772350.txt": "f12ee125d8483e4a8e966171a98c5614204a19d1342950408411870818026c8e",
+    "calib.txt": "5bc9f06af1897c526086493e46263c4972f64ecb3f87b3128879167fad0a4963",
+    "ru-68.txt": "4199245ebdac44670b5d59249e054e2ca0b3e5d9ddb39e0e5bfead78d1214d5c",
+    "ru-384.txt": "9a29f3840f70d4a85768f70e52b9d579d414cf4a0b2d56267065c5ec4a0b5463",
+    "en-22939.txt": "d4ae4ff28b8b52b8290e8fdf505939d28bb517f05cf0a4edfa146408ff83a251",
+    "ru-6182161.txt": "5156f82d5703a68f3d0a248143592238c43445dc99a5bf1f7332f450efe0dc5a",
+    "en-9127632.txt": "a1ab4560cb8859f5c35c10f474b94e4c0a50daad4fb751fa160444e9d91a6989",
+    "en-18963910.txt": "0caa42f0038182430bac06c15fa11c75a83876f07576e700279e79e241090749",
+    "en-50650.txt": "ba2952b73251d15662163567dd061b3a54ffb5c99a233804a5144760f4efeb54"
+  }
+}

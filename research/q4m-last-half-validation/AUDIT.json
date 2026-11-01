@@ -1,0 +1,11 @@
+{
+  "matrix": "research/matrix-20261102-020806",
+  "old_modes": 18,
+  "old_model_hashes_match": 18,
+  "all_selftests": "5/5",
+  "texts_match": true,
+  "new_flag_manifest": true,
+  "candidate_smaller_ppl_all_6": true,
+  "model": "N-Q 8-layer",
+  "warning": "One model, limited related text; new flag is experimental."
+}

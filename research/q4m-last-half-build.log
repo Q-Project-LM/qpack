@@ -1,0 +1,10 @@
+[ 51%] Built target qpack
+[ 58%] Built target qpack-cli
+[ 65%] Built target qpack-server
+[ 72%] Built target qpack-bench
+[ 75%] Building CXX object CMakeFiles/qpack-quantize.dir/tools/qpack-quantize.cpp.o
+[ 82%] Built target test_circuits
+[ 93%] Built target qpack-perplexity
+[ 96%] Built target test_tokenizer
+[100%] Linking CXX executable qpack-quantize
+[100%] Built target qpack-quantize

@@ -1,0 +1,5 @@
+| model | MiB | arch | threads | pp64 tok/s | tg128 tok/s |
+|---|---|---|---|---|---|
+| q4m-gptq.qpack | 30.1 | nq4 | 1 | 400.3 | 326.7 |
+| q4m-gptq.qpack | 30.1 | nq4 | 8 | 1568.5 | 643.1 |
+| q4m-gptq.qpack | 30.1 | nq4 | 16 | 2129.3 | 567.6 |

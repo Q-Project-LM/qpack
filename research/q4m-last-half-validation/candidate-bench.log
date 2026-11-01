@@ -1,0 +1,5 @@
+| model | MiB | arch | threads | pp64 tok/s | tg128 tok/s |
+|---|---|---|---|---|---|
+| candidate.qpack | 30.1 | nq4 | 1 | 391.1 | 328.7 |
+| candidate.qpack | 30.1 | nq4 | 8 | 1504.6 | 631.6 |
+| candidate.qpack | 30.1 | nq4 | 16 | 2034.3 | 562.2 |

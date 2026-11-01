@@ -62,14 +62,15 @@ std::unique_ptr<qp::Model> make(std::shared_ptr<qp::Container> c) {
 }
 // q4m: like llama.cpp's Q4_K_M, the value projections and the FFN down projections of the first and last eighth of the
 // layers and of every third layer in between stay q8 (these matrices carry most of the 4-bit error)
-bool more_bits(const std::string &name, int n_layers) {
+bool more_bits(const std::string &name, int n_layers, bool last_half) {
   if (name.compare(0, 7, "layers.") != 0 || n_layers <= 0) return false;
   const int i = atoi(name.c_str() + 7); const std::string tail = name.substr(name.find('.', 7) + 1);
   if (tail == "wv" || tail == "mixer.v.weight") return true;
   if (tail != "w_down" && tail != "ffn.down.weight") return false;
+  if (last_half) return i >= n_layers / 2;
   return i < n_layers / 8 || i >= 7 * n_layers / 8 || (i - n_layers / 8) % 3 == 2;
 }
-const char *kUsage = "usage: qpack-quantize in.qpack out.qpack [--type q4|q4m|q8] [--keep-q8 name,...] [--q4-head] [--calib text.txt [--gptq [--act-order]]] [--calib-tokens 4096] [-t threads]\n";
+const char *kUsage = "usage: qpack-quantize in.qpack out.qpack [--type q4|q4m|q8] [--keep-q8 name,...] [--q4-head] [--q4m-last-half] [--calib text.txt [--gptq [--act-order]]] [--calib-tokens 4096] [-t threads]\n";
 
 // statistics of every matrix input from running the source model over calibration text: mean squared activation per
 // column (importance), and with gptq the second moment H = sum x x^T (shared by matrices reading the same input)
@@ -200,7 +201,7 @@ void gptq_q4(const qp::Tensor &t, const std::vector<float> &Hf, uint8_t *q, uint
 }  // namespace
 
 int main(int argc, char **argv) {
-  std::string in, out, type = "q4", calib; int calib_tokens = 4096; bool gptq = false, act_order = false, q4_head = false; std::set<std::string> keep;
+  std::string in, out, type = "q4", calib; int calib_tokens = 4096; bool gptq = false, act_order = false, q4_head = false, q4m_last_half = false; std::set<std::string> keep;
   for (int i = 1; i < argc; i++) {
     std::string a = argv[i];
     if (a == "--type" && i + 1 < argc) type = argv[++i];
@@ -212,12 +213,14 @@ int main(int argc, char **argv) {
     else if (a == "--calib-tokens" && i + 1 < argc) calib_tokens = std::stoi(argv[++i]);
     else if (a == "--gptq") gptq = true;
     else if (a == "--q4-head") q4_head = true;
+    else if (a == "--q4m-last-half") q4m_last_half = true;
     else if (a == "--act-order") act_order = true;
     else if (in.empty() && a[0] != '-') in = a;
     else if (out.empty() && a[0] != '-') out = a;
     else { fputs(kUsage, stderr); return 2; }
   }
   if (in.empty() || out.empty() || (type != "q4" && type != "q4m" && type != "q8")) { fputs(kUsage, stderr); return 2; }
+  if (q4m_last_half && type != "q4m") { fprintf(stderr, "--q4m-last-half requires --type q4m\n"); return 2; }
   if (!q4_head) for (const char *n : {"embed", "lm_head", "embed.weight", "lm_head.weight"}) keep.insert(n);
   try {
     auto t0 = std::chrono::steady_clock::now();
@@ -253,7 +256,7 @@ int main(int argc, char **argv) {
         n_other += t ? t->numel() : 0; tensors.push(ent); continue;
       }
       const int rows = (int)t->rows(), cols = (int)t->cols();
-      const bool to_q4 = (type == "q4" || (type == "q4m" && !more_bits(name, n_layers))) && cols % 32 == 0 && !keep.count(name);
+      const bool to_q4 = (type == "q4" || (type == "q4m" && !more_bits(name, n_layers, q4m_last_half))) && cols % 32 == 0 && !keep.count(name);
       if (!to_q4 && t->kind == qp::Kind::Q8) {   // already q8: copied, no second rounding
         ent.set("kind", "q8"); ent.set("blob", copy_blob(e["blob"].as_str(), bid)); ent.set("scale", copy_blob(e["scale"].as_str(), bid));
         n_q8 += t->numel(); tensors.push(ent); continue;
@@ -293,7 +296,7 @@ int main(int argc, char **argv) {
       }
       tensors.push(ent);
     }
-    man.set("format", "QPACK2"); man.set("quant", type); if (!calib.empty()) { man.set("calibration_tokens", calib_tokens); man.set("gptq", gptq); } man.set("tensors", tensors);
+    man.set("format", "QPACK2"); man.set("quant", type); if (q4m_last_half) man.set("q4m_last_half", true); if (!calib.empty()) { man.set("calibration_tokens", calib_tokens); man.set("gptq", gptq); } man.set("tensors", tensors);
     std::vector<std::pair<std::string, std::string>> all;
     all.push_back({"manifest.json", man.dump()});
     for (auto &n : src.blob_names()) if (!tensor_blobs.count(n) && n != "manifest.json" && n != "selftest.json") all.push_back({n, src.text(n)});

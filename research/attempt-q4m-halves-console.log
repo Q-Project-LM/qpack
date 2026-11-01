@@ -1,0 +1,5 @@
+RUN firsthalf
+EXIT firsthalf 0
+RUN lasthalf
+EXIT lasthalf 0
+COMPLETE

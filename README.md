@@ -77,6 +77,8 @@ build/qpack-quantize model.f32.qpack model.q4.qpack --calib calib.txt --calib-to
 build/qpack-quantize model.f32.qpack model.q4m.qpack --type q4m --calib calib.txt --calib-tokens 8192 --gptq
 ```
 
+Optional experimental `--q4m-last-half` (requires `--type q4m`) keeps the FFN down projections in the last half of layers at q8 instead of the default q4m layer selection. Value projections retain the usual q4m policy. It has shown a small PPL improvement for one N-Q model on the recorded research texts; results may vary by model. Omitting the flag preserves the default policy.
+
 The source can be f32, f16 or q8 (best: the unquantised file). Group scales are chosen by minimum (activation-weighted)
 squared error; `--gptq` quantises columns left to right and pushes each rounding error onto the remaining columns
 through the inverse of H = Σ x xᵀ collected on the calibration text (Frantar et al., 2022). The self-test of the output

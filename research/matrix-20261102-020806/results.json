@@ -1,0 +1,967 @@
+[
+  {
+    "name": "f16",
+    "flags": null,
+    "status": "ok",
+    "bytes": 93736125,
+    "sha256": "1e22aafe3679970cdd136cbab1b99d60a3430f762d50a6ca69019391577d4c0c",
+    "path": "model.qpack",
+    "selftest": "5/5",
+    "ppl": {
+      "ru": {
+        "tokens": 2040,
+        "nll": 3.15495,
+        "perplexity": 23.4519
+      },
+      "en": {
+        "tokens": 2040,
+        "nll": 2.47044,
+        "perplexity": 11.8276
+      }
+    },
+    "pilot_ppl": {
+      "ru": {
+        "tokens": 510,
+        "nll": 2.78448,
+        "perplexity": 16.1914
+      },
+      "en": {
+        "tokens": 510,
+        "nll": 2.47576,
+        "perplexity": 11.8907
+      }
+    },
+    "bench": {
+      "1": {
+        "prompt": 353.7,
+        "decode": 148.0
+      },
+      "8": {
+        "prompt": 1539.9,
+        "decode": 454.3
+      },
+      "16": {
+        "prompt": 2209.8,
+        "decode": 416.3
+      }
+    }
+  },
+  {
+    "name": "q8",
+    "flags": [
+      "--type",
+      "q8"
+    ],
+    "status": "ok",
+    "bytes": 48798784,
+    "sha256": "73a5e7defc4976a76f1aa9d17c28c1741e7957da31a2be836e70deaf150c07a5",
+    "path": "research/matrix-20261102-020806/artifacts/q8.qpack",
+    "selftest": "5/5",
+    "ppl": {
+      "ru": {
+        "tokens": 2040,
+        "nll": 3.1548,
+        "perplexity": 23.4483
+      },
+      "en": {
+        "tokens": 2040,
+        "nll": 2.47132,
+        "perplexity": 11.8381
+      }
+    },
+    "pilot_ppl": {
+      "ru": {
+        "tokens": 510,
+        "nll": 2.78164,
+        "perplexity": 16.1454
+      },
+      "en": {
+        "tokens": 510,
+        "nll": 2.47857,
+        "perplexity": 11.9242
+      }
+    },
+    "bench": {
+      "1": {
+        "prompt": 191.3,
+        "decode": 162.9
+      },
+      "8": {
+        "prompt": 981.3,
+        "decode": 505.0
+      },
+      "16": {
+        "prompt": 1520.5,
+        "decode": 517.4
+      }
+    }
+  },
+  {
+    "name": "q4-plain",
+    "flags": [
+      "--type",
+      "q4"
+    ],
+    "status": "ok",
+    "bytes": 30884992,
+    "sha256": "0cde501ad009803ab9478eb6dfab4f71010c13ffb487c76bc757e8b41a12edbf",
+    "path": "research/matrix-20261102-020806/artifacts/q4-plain.qpack",
+    "selftest": "5/5",
+    "ppl": {
+      "ru": {
+        "tokens": 2040,
+        "nll": 3.17607,
+        "perplexity": 23.9525
+      },
+      "en": {
+        "tokens": 2040,
+        "nll": 2.5021,
+        "perplexity": 12.2081
+      }
+    },
+    "pilot_ppl": {
+      "ru": {
+        "tokens": 510,
+        "nll": 2.80247,
+        "perplexity": 16.4853
+      },
+      "en": {
+        "tokens": 510,
+        "nll": 2.4885,
+        "perplexity": 12.0433
+      }
+    },
+    "bench": {
+      "1": {
+        "prompt": 399.8,
+        "decode": 338.7
+      },
+      "8": {
+        "prompt": 1591.9,
+        "decode": 656.0
+      },
+      "16": {
+        "prompt": 2195.3,
+        "decode": 625.8
+      }
+    }
+  },
+  {
+    "name": "q4-plain-head4",
+    "flags": [
+      "--type",
+      "q4",
+      "--q4-head"
+    ],
+    "status": "ok",
+    "bytes": 27120320,
+    "sha256": "670c667a2c0be9781da189886e1d1fcc8d2b2d919b4154a14ec9419bd291378f",
+    "path": "research/matrix-20261102-020806/artifacts/q4-plain-head4.qpack",
+    "selftest": "5/5",
+    "ppl": {
+      "ru": {
+        "tokens": 2040,
+        "nll": 3.18491,
+        "perplexity": 24.1651
+      },
+      "en": {
+        "tokens": 2040,
+        "nll": 2.51587,
+        "perplexity": 12.3774
+      }
+    },
+    "pilot_ppl": {
+      "ru": {
+        "tokens": 510,
+        "nll": 2.82634,
+        "perplexity": 16.8836
+      },
+      "en": {
+        "tokens": 510,
+        "nll": 2.49445,
+        "perplexity": 12.1151
+      }
+    },
+    "bench": {
+      "1": {
+        "prompt": 445.6,
+        "decode": 327.7
+      },
+      "8": {
+        "prompt": 1622.1,
+        "decode": 654.5
+      },
+      "16": {
+        "prompt": 2192.5,
+        "decode": 623.6
+      }
+    }
+  },
+  {
+    "name": "q4-calib",
+    "flags": [
+      "--type",
+      "q4",
+      "--calib",
+      "research/matrix-20261102-020806/data/calib.txt",
+      "--calib-tokens",
+      "8192"
+    ],
+    "status": "ok",
+    "bytes": 30885056,
+    "sha256": "6c31755efcfdf4aa5c8ef8e8c2d3bb304e9178f4efc166c5dac094715ceae3b4",
+    "path": "research/matrix-20261102-020806/artifacts/q4-calib.qpack",
+    "selftest": "5/5",
+    "ppl": {
+      "ru": {
+        "tokens": 2040,
+        "nll": 3.1691,
+        "perplexity": 23.7861
+      },
+      "en": {
+        "tokens": 2040,
+        "nll": 2.49679,
+        "perplexity": 12.1435
+      }
+    },
+    "pilot_ppl": {
+      "ru": {
+        "tokens": 510,
+        "nll": 2.79711,
+        "perplexity": 16.3973
+      },
+      "en": {
+        "tokens": 510,
+        "nll": 2.49933,
+        "perplexity": 12.1743
+      }
+    },
+    "bench": {
+      "1": {
+        "prompt": 442.6,
+        "decode": 323.1
+      },
+      "8": {
+        "prompt": 1550.2,
+        "decode": 600.1
+      },
+      "16": {
+        "prompt": 2192.5,
+        "decode": 543.4
+      }
+    }
+  },
+  {
+    "name": "q4-calib-head4",
+    "flags": [
+      "--type",
+      "q4",
+      "--calib",
+      "research/matrix-20261102-020806/data/calib.txt",
+      "--calib-tokens",
+      "8192",
+      "--q4-head"
+    ],
+    "status": "ok",
+    "bytes": 27120320,
+    "sha256": "b2228e610f560796c0ef2820aab97d86a7f0f744ad778917847521eb2d4e523b",
+    "path": "research/matrix-20261102-020806/artifacts/q4-calib-head4.qpack",
+    "selftest": "5/5",
+    "ppl": {
+      "ru": {
+        "tokens": 2040,
+        "nll": 3.17982,
+        "perplexity": 24.0423
+      },
+      "en": {
+        "tokens": 2040,
+        "nll": 2.51117,
+        "perplexity": 12.3193
+      }
+    },
+    "pilot_ppl": {
+      "ru": {
+        "tokens": 510,
+        "nll": 2.82042,
+        "perplexity": 16.784
+      },
+      "en": {
+        "tokens": 510,
+        "nll": 2.50768,
+        "perplexity": 12.2764
+      }
+    },
+    "bench": {
+      "1": {
+        "prompt": 435.0,
+        "decode": 360.4
+      },
+      "8": {
+        "prompt": 1626.3,
+        "decode": 636.2
+      },
+      "16": {
+        "prompt": 2140.0,
+        "decode": 537.1
+      }
+    }
+  },
+  {
+    "name": "q4-gptq",
+    "flags": [
+      "--type",
+      "q4",
+      "--calib",
+      "research/matrix-20261102-020806/data/calib.txt",
+      "--calib-tokens",
+      "8192",
+      "--gptq"
+    ],
+    "status": "ok",
+    "bytes": 30885056,
+    "sha256": "ac6265c233c390228b3ce176e9a21ee75f88e68b5a9dfca8f12302bab0247c5f",
+    "path": "research/matrix-20261102-020806/artifacts/q4-gptq.qpack",
+    "selftest": "5/5",
+    "ppl": {
+      "ru": {
+        "tokens": 2040,
+        "nll": 3.15464,
+        "perplexity": 23.4445
+      },
+      "en": {
+        "tokens": 2040,
+        "nll": 2.4819,
+        "perplexity": 11.9639
+      }
+    },
+    "pilot_ppl": {
+      "ru": {
+        "tokens": 510,
+        "nll": 2.79892,
+        "perplexity": 16.4269
+      },
+      "en": {
+        "tokens": 510,
+        "nll": 2.47443,
+        "perplexity": 11.875
+      }
+    },
+    "bench": {
+      "1": {
+        "prompt": 393.4,
+        "decode": 328.6
+      },
+      "8": {
+        "prompt": 1573.5,
+        "decode": 628.4
+      },
+      "16": {
+        "prompt": 2101.4,
+        "decode": 547.2
+      }
+    }
+  },
+  {
+    "name": "q4-gptq-head4",
+    "flags": [
+      "--type",
+      "q4",
+      "--calib",
+      "research/matrix-20261102-020806/data/calib.txt",
+      "--calib-tokens",
+      "8192",
+      "--gptq",
+      "--q4-head"
+    ],
+    "status": "ok",
+    "bytes": 27120320,
+    "sha256": "f80b47d6c61f00a6f937d6f81829cfefb80bd37db523ed367cd2b9e6b973c4ef",
+    "path": "research/matrix-20261102-020806/artifacts/q4-gptq-head4.qpack",
+    "selftest": "5/5",
+    "ppl": {
+      "ru": {
+        "tokens": 2040,
+        "nll": 3.16538,
+        "perplexity": 23.6976
+      },
+      "en": {
+        "tokens": 2040,
+        "nll": 2.49576,
+        "perplexity": 12.131
+      }
+    },
+    "pilot_ppl": {
+      "ru": {
+        "tokens": 510,
+        "nll": 2.82321,
+        "perplexity": 16.8308
+      },
+      "en": {
+        "tokens": 510,
+        "nll": 2.48413,
+        "perplexity": 11.9907
+      }
+    },
+    "bench": {
+      "1": {
+        "prompt": 436.6,
+        "decode": 346.7
+      },
+      "8": {
+        "prompt": 1664.4,
+        "decode": 636.7
+      },
+      "16": {
+        "prompt": 2144.4,
+        "decode": 552.4
+      }
+    }
+  },
+  {
+    "name": "q4-gptq-act",
+    "flags": [
+      "--type",
+      "q4",
+      "--calib",
+      "research/matrix-20261102-020806/data/calib.txt",
+      "--calib-tokens",
+      "8192",
+      "--gptq",
+      "--act-order"
+    ],
+    "status": "ok",
+    "bytes": 30885056,
+    "sha256": "96e93f87d4d073853d34b8f194a77772c66a28e6135cb9a14da5d6fa73207b61",
+    "path": "research/matrix-20261102-020806/artifacts/q4-gptq-act.qpack",
+    "selftest": "5/5",
+    "ppl": {
+      "ru": {
+        "tokens": 2040,
+        "nll": 3.15867,
+        "perplexity": 23.5392
+      },
+      "en": {
+        "tokens": 2040,
+        "nll": 2.47632,
+        "perplexity": 11.8974
+      }
+    },
+    "pilot_ppl": {
+      "ru": {
+        "tokens": 510,
+        "nll": 2.78145,
+        "perplexity": 16.1425
+      },
+      "en": {
+        "tokens": 510,
+        "nll": 2.49538,
+        "perplexity": 12.1263
+      }
+    },
+    "bench": {
+      "1": {
+        "prompt": 403.4,
+        "decode": 285.4
+      },
+      "8": {
+        "prompt": 1571.3,
+        "decode": 615.6
+      },
+      "16": {
+        "prompt": 2163.7,
+        "decode": 548.0
+      }
+    }
+  },
+  {
+    "name": "q4-gptq-act-head4",
+    "flags": [
+      "--type",
+      "q4",
+      "--calib",
+      "research/matrix-20261102-020806/data/calib.txt",
+      "--calib-tokens",
+      "8192",
+      "--gptq",
+      "--act-order",
+      "--q4-head"
+    ],
+    "status": "ok",
+    "bytes": 27120320,
+    "sha256": "84fe90f04e510e2076379bc393cd9c074645a9b92e4d934741b2988d78ebbeba",
+    "path": "research/matrix-20261102-020806/artifacts/q4-gptq-act-head4.qpack",
+    "selftest": "5/5",
+    "ppl": {
+      "ru": {
+        "tokens": 2040,
+        "nll": 3.16858,
+        "perplexity": 23.7738
+      },
+      "en": {
+        "tokens": 2040,
+        "nll": 2.49045,
+        "perplexity": 12.0667
+      }
+    },
+    "pilot_ppl": {
+      "ru": {
+        "tokens": 510,
+        "nll": 2.80476,
+        "perplexity": 16.523
+      },
+      "en": {
+        "tokens": 510,
+        "nll": 2.50415,
+        "perplexity": 12.2332
+      }
+    },
+    "bench": {
+      "1": {
+        "prompt": 397.9,
+        "decode": 328.7
+      },
+      "8": {
+        "prompt": 1555.4,
+        "decode": 619.9
+      },
+      "16": {
+        "prompt": 2178.0,
+        "decode": 552.6
+      }
+    }
+  },
+  {
+    "name": "q4m-plain",
+    "flags": [
+      "--type",
+      "q4m"
+    ],
+    "status": "ok",
+    "bytes": 31582272,
+    "sha256": "56e859b17e9b2b580ece9b47286a5c567885e5d35da143d1e2d63df0da5eee6b",
+    "path": "research/matrix-20261102-020806/artifacts/q4m-plain.qpack",
+    "selftest": "5/5",
+    "ppl": {
+      "ru": {
+        "tokens": 2040,
+        "nll": 3.16833,
+        "perplexity": 23.7679
+      },
+      "en": {
+        "tokens": 2040,
+        "nll": 2.49602,
+        "perplexity": 12.1341
+      }
+    },
+    "pilot_ppl": {
+      "ru": {
+        "tokens": 510,
+        "nll": 2.7966,
+        "perplexity": 16.3888
+      },
+      "en": {
+        "tokens": 510,
+        "nll": 2.4826,
+        "perplexity": 11.9724
+      }
+    },
+    "bench": {
+      "1": {
+        "prompt": 387.1,
+        "decode": 319.3
+      },
+      "8": {
+        "prompt": 1553.3,
+        "decode": 644.1
+      },
+      "16": {
+        "prompt": 2081.0,
+        "decode": 633.4
+      }
+    }
+  },
+  {
+    "name": "q4m-plain-head4",
+    "flags": [
+      "--type",
+      "q4m",
+      "--q4-head"
+    ],
+    "status": "ok",
+    "bytes": 27817600,
+    "sha256": "3f0a1d0054c0a4b25dc291bca72be8aa8774a6d6faccec6c13ce139b8347d822",
+    "path": "research/matrix-20261102-020806/artifacts/q4m-plain-head4.qpack",
+    "selftest": "5/5",
+    "ppl": {
+      "ru": {
+        "tokens": 2040,
+        "nll": 3.17718,
+        "perplexity": 23.979
+      },
+      "en": {
+        "tokens": 2040,
+        "nll": 2.51006,
+        "perplexity": 12.3057
+      }
+    },
+    "pilot_ppl": {
+      "ru": {
+        "tokens": 510,
+        "nll": 2.82102,
+        "perplexity": 16.794
+      },
+      "en": {
+        "tokens": 510,
+        "nll": 2.48958,
+        "perplexity": 12.0562
+      }
+    },
+    "bench": {
+      "1": {
+        "prompt": 384.5,
+        "decode": 292.4
+      },
+      "8": {
+        "prompt": 1528.5,
+        "decode": 632.7
+      },
+      "16": {
+        "prompt": 2176.7,
+        "decode": 656.6
+      }
+    }
+  },
+  {
+    "name": "q4m-calib",
+    "flags": [
+      "--type",
+      "q4m",
+      "--calib",
+      "research/matrix-20261102-020806/data/calib.txt",
+      "--calib-tokens",
+      "8192"
+    ],
+    "status": "ok",
+    "bytes": 31582336,
+    "sha256": "173d62352c6da3c1af688b903afc965a82bcf9342a4a71a432bf21b45e5bbfe9",
+    "path": "research/matrix-20261102-020806/artifacts/q4m-calib.qpack",
+    "selftest": "5/5",
+    "ppl": {
+      "ru": {
+        "tokens": 2040,
+        "nll": 3.16351,
+        "perplexity": 23.6534
+      },
+      "en": {
+        "tokens": 2040,
+        "nll": 2.49076,
+        "perplexity": 12.0704
+      }
+    },
+    "pilot_ppl": {
+      "ru": {
+        "tokens": 510,
+        "nll": 2.79106,
+        "perplexity": 16.2982
+      },
+      "en": {
+        "tokens": 510,
+        "nll": 2.49545,
+        "perplexity": 12.1272
+      }
+    },
+    "bench": {
+      "1": {
+        "prompt": 387.6,
+        "decode": 322.4
+      },
+      "8": {
+        "prompt": 1566.0,
+        "decode": 625.5
+      },
+      "16": {
+        "prompt": 2138.8,
+        "decode": 548.7
+      }
+    }
+  },
+  {
+    "name": "q4m-calib-head4",
+    "flags": [
+      "--type",
+      "q4m",
+      "--calib",
+      "research/matrix-20261102-020806/data/calib.txt",
+      "--calib-tokens",
+      "8192",
+      "--q4-head"
+    ],
+    "status": "ok",
+    "bytes": 27817600,
+    "sha256": "242d2ff51b48e8682c15ef83dccf50094d918cb7f490323406497aae545414f2",
+    "path": "research/matrix-20261102-020806/artifacts/q4m-calib-head4.qpack",
+    "selftest": "5/5",
+    "ppl": {
+      "ru": {
+        "tokens": 2040,
+        "nll": 3.17393,
+        "perplexity": 23.9012
+      },
+      "en": {
+        "tokens": 2040,
+        "nll": 2.50487,
+        "perplexity": 12.242
+      }
+    },
+    "pilot_ppl": {
+      "ru": {
+        "tokens": 510,
+        "nll": 2.81415,
+        "perplexity": 16.679
+      },
+      "en": {
+        "tokens": 510,
+        "nll": 2.50275,
+        "perplexity": 12.2161
+      }
+    },
+    "bench": {
+      "1": {
+        "prompt": 387.1,
+        "decode": 282.9
+      },
+      "8": {
+        "prompt": 1591.2,
+        "decode": 660.9
+      },
+      "16": {
+        "prompt": 2021.4,
+        "decode": 639.7
+      }
+    }
+  },
+  {
+    "name": "q4m-gptq",
+    "flags": [
+      "--type",
+      "q4m",
+      "--calib",
+      "research/matrix-20261102-020806/data/calib.txt",
+      "--calib-tokens",
+      "8192",
+      "--gptq"
+    ],
+    "status": "ok",
+    "bytes": 31582336,
+    "sha256": "62b3126cef0e986f9e9840e6a1f5a9b87af0c5a657d30572328979aa30ab75f1",
+    "path": "research/matrix-20261102-020806/artifacts/q4m-gptq.qpack",
+    "selftest": "5/5",
+    "ppl": {
+      "ru": {
+        "tokens": 2040,
+        "nll": 3.15167,
+        "perplexity": 23.3751
+      },
+      "en": {
+        "tokens": 2040,
+        "nll": 2.47795,
+        "perplexity": 11.9168
+      }
+    },
+    "pilot_ppl": {
+      "ru": {
+        "tokens": 510,
+        "nll": 2.79586,
+        "perplexity": 16.3767
+      },
+      "en": {
+        "tokens": 510,
+        "nll": 2.47479,
+        "perplexity": 11.8793
+      }
+    },
+    "bench": {
+      "1": {
+        "prompt": 400.3,
+        "decode": 326.7
+      },
+      "8": {
+        "prompt": 1568.5,
+        "decode": 643.1
+      },
+      "16": {
+        "prompt": 2129.3,
+        "decode": 567.6
+      }
+    }
+  },
+  {
+    "name": "q4m-gptq-head4",
+    "flags": [
+      "--type",
+      "q4m",
+      "--calib",
+      "research/matrix-20261102-020806/data/calib.txt",
+      "--calib-tokens",
+      "8192",
+      "--gptq",
+      "--q4-head"
+    ],
+    "status": "ok",
+    "bytes": 27817600,
+    "sha256": "bebba3f05f08babaf421fb952caf4bea9436992f362f7fa25bd50dd1bbf65e16",
+    "path": "research/matrix-20261102-020806/artifacts/q4m-gptq-head4.qpack",
+    "selftest": "5/5",
+    "ppl": {
+      "ru": {
+        "tokens": 2040,
+        "nll": 3.16227,
+        "perplexity": 23.6242
+      },
+      "en": {
+        "tokens": 2040,
+        "nll": 2.49201,
+        "perplexity": 12.0855
+      }
+    },
+    "pilot_ppl": {
+      "ru": {
+        "tokens": 510,
+        "nll": 2.81988,
+        "perplexity": 16.7749
+      },
+      "en": {
+        "tokens": 510,
+        "nll": 2.48382,
+        "perplexity": 11.987
+      }
+    },
+    "bench": {
+      "1": {
+        "prompt": 367.6,
+        "decode": 270.9
+      },
+      "8": {
+        "prompt": 1532.9,
+        "decode": 646.6
+      },
+      "16": {
+        "prompt": 2066.8,
+        "decode": 612.4
+      }
+    }
+  },
+  {
+    "name": "q4m-gptq-act",
+    "flags": [
+      "--type",
+      "q4m",
+      "--calib",
+      "research/matrix-20261102-020806/data/calib.txt",
+      "--calib-tokens",
+      "8192",
+      "--gptq",
+      "--act-order"
+    ],
+    "status": "ok",
+    "bytes": 31582336,
+    "sha256": "47f61f4500eac04ec205f15bcb33b0ad7e2667f19d279317b33c32b67454e22e",
+    "path": "research/matrix-20261102-020806/artifacts/q4m-gptq-act.qpack",
+    "selftest": "5/5",
+    "ppl": {
+      "ru": {
+        "tokens": 2040,
+        "nll": 3.15795,
+        "perplexity": 23.5224
+      },
+      "en": {
+        "tokens": 2040,
+        "nll": 2.47612,
+        "perplexity": 11.8951
+      }
+    },
+    "pilot_ppl": {
+      "ru": {
+        "tokens": 510,
+        "nll": 2.77859,
+        "perplexity": 16.0964
+      },
+      "en": {
+        "tokens": 510,
+        "nll": 2.49666,
+        "perplexity": 12.1418
+      }
+    },
+    "bench": {
+      "1": {
+        "prompt": 366.6,
+        "decode": 313.6
+      },
+      "8": {
+        "prompt": 1529.1,
+        "decode": 617.0
+      },
+      "16": {
+        "prompt": 2130.3,
+        "decode": 544.7
+      }
+    }
+  },
+  {
+    "name": "q4m-gptq-act-head4",
+    "flags": [
+      "--type",
+      "q4m",
+      "--calib",
+      "research/matrix-20261102-020806/data/calib.txt",
+      "--calib-tokens",
+      "8192",
+      "--gptq",
+      "--act-order",
+      "--q4-head"
+    ],
+    "status": "ok",
+    "bytes": 27817600,
+    "sha256": "ae5f5cacca62f3934c2e8b873257d4780faa101d4b84d9f2288b414f4945bbca",
+    "path": "research/matrix-20261102-020806/artifacts/q4m-gptq-act-head4.qpack",
+    "selftest": "5/5",
+    "ppl": {
+      "ru": {
+        "tokens": 2040,
+        "nll": 3.16788,
+        "perplexity": 23.7571
+      },
+      "en": {
+        "tokens": 2040,
+        "nll": 2.49033,
+        "perplexity": 12.0652
+      }
+    },
+    "pilot_ppl": {
+      "ru": {
+        "tokens": 510,
+        "nll": 2.80184,
+        "perplexity": 16.475
+      },
+      "en": {
+        "tokens": 510,
+        "nll": 2.50514,
+        "perplexity": 12.2452
+      }
+    },
+    "bench": {
+      "1": {
+        "prompt": 384.6,
+        "decode": 286.9
+      },
+      "8": {
+        "prompt": 1512.0,
+        "decode": 647.9
+      },
+      "16": {
+        "prompt": 2084.8,
+        "decode": 617.0
+      }
+    }
+  }
+]

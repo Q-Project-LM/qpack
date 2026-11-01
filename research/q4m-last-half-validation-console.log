@@ -1,0 +1,21 @@
+RUN invalid
+EXIT invalid 2
+RUN default-quantize
+EXIT default-quantize 0
+RUN candidate-quantize
+EXIT candidate-quantize 0
+RUN selftest
+EXIT selftest 0
+RUN candidate-extended-ru
+EXIT candidate-extended-ru 0
+RUN candidate-extended-en
+EXIT candidate-extended-en 0
+RUN candidate-bench
+EXIT candidate-bench 0
+RUN reference-extended-ru
+EXIT reference-extended-ru 0
+RUN reference-extended-en
+EXIT reference-extended-en 0
+RUN reference-bench
+EXIT reference-bench 0
+DONE
