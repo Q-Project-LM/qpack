@@ -1,0 +1,32 @@
+RUN build
+EXIT build 0
+RUN quantize
+EXIT quantize 0
+RUN selftest
+EXIT selftest 0
+RUN reference-wiki-ru
+EXIT reference-wiki-ru 0
+RUN reference-wiki-en
+EXIT reference-wiki-en 0
+RUN reference-pilot-ru
+EXIT reference-pilot-ru 0
+RUN reference-pilot-en
+EXIT reference-pilot-en 0
+RUN reference-extended-ru
+EXIT reference-extended-ru 0
+RUN reference-extended-en
+EXIT reference-extended-en 0
+RUN candidate-wiki-ru
+EXIT candidate-wiki-ru 0
+RUN candidate-wiki-en
+EXIT candidate-wiki-en 0
+RUN candidate-pilot-ru
+EXIT candidate-pilot-ru 0
+RUN candidate-pilot-en
+EXIT candidate-pilot-en 0
+RUN candidate-extended-ru
+EXIT candidate-extended-ru 0
+RUN candidate-extended-en
+EXIT candidate-extended-en 0
+SIZES 31582336 31582336
+COMPLETE

@@ -1,0 +1,268 @@
+[
+  {
+    "label": "build",
+    "args": [
+      "g++",
+      "-std=c++17",
+      "-O3",
+      "-march=native",
+      "-Iinclude",
+      "research/attempt-q4m-middle/quantize.cpp",
+      "build/libqpack.a",
+      "-pthread",
+      "-o",
+      "research/attempt-q4m-middle/quantize"
+    ],
+    "code": 0,
+    "seconds": 6.695456504821777
+  },
+  {
+    "label": "quantize",
+    "args": [
+      "research/attempt-q4m-middle/quantize",
+      "model.qpack",
+      "research/attempt-q4m-middle/candidate.qpack",
+      "--type",
+      "q4m",
+      "--calib",
+      "research/matrix-20261102-003657/data/calib.txt",
+      "--calib-tokens",
+      "8192",
+      "--gptq",
+      "--act-order",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 49.21051907539368
+  },
+  {
+    "label": "selftest",
+    "args": [
+      "build/qpack-cli",
+      "-m",
+      "research/attempt-q4m-middle/candidate.qpack",
+      "--selftest",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 0.10593819618225098
+  },
+  {
+    "label": "reference-wiki-ru",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/matrix-20261102-003657/artifacts/q4m-gptq-act-retry.qpack",
+      "-f",
+      "research/matrix-20261102-003657/data/eval-ru.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "8",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 3.441575527191162
+  },
+  {
+    "label": "reference-wiki-en",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/matrix-20261102-003657/artifacts/q4m-gptq-act-retry.qpack",
+      "-f",
+      "research/matrix-20261102-003657/data/eval-en.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "8",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 3.784186363220215
+  },
+  {
+    "label": "reference-pilot-ru",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/matrix-20261102-003657/artifacts/q4m-gptq-act-retry.qpack",
+      "-f",
+      "research/baseline-20261102-001640/eval-ru.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "2",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 0.9179785251617432
+  },
+  {
+    "label": "reference-pilot-en",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/matrix-20261102-003657/artifacts/q4m-gptq-act-retry.qpack",
+      "-f",
+      "research/baseline-20261102-001640/eval-en.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "2",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 1.0542850494384766
+  },
+  {
+    "label": "reference-extended-ru",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/matrix-20261102-003657/artifacts/q4m-gptq-act-retry.qpack",
+      "-f",
+      "research/extended-holdout/ru.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "20",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 9.10547947883606
+  },
+  {
+    "label": "reference-extended-en",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/matrix-20261102-003657/artifacts/q4m-gptq-act-retry.qpack",
+      "-f",
+      "research/extended-holdout/en.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "20",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 9.956475019454956
+  },
+  {
+    "label": "candidate-wiki-ru",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/attempt-q4m-middle/candidate.qpack",
+      "-f",
+      "research/matrix-20261102-003657/data/eval-ru.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "8",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 3.5322635173797607
+  },
+  {
+    "label": "candidate-wiki-en",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/attempt-q4m-middle/candidate.qpack",
+      "-f",
+      "research/matrix-20261102-003657/data/eval-en.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "8",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 3.706556558609009
+  },
+  {
+    "label": "candidate-pilot-ru",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/attempt-q4m-middle/candidate.qpack",
+      "-f",
+      "research/baseline-20261102-001640/eval-ru.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "2",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 0.8818402290344238
+  },
+  {
+    "label": "candidate-pilot-en",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/attempt-q4m-middle/candidate.qpack",
+      "-f",
+      "research/baseline-20261102-001640/eval-en.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "2",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 1.0451195240020752
+  },
+  {
+    "label": "candidate-extended-ru",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/attempt-q4m-middle/candidate.qpack",
+      "-f",
+      "research/extended-holdout/ru.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "20",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 8.681260824203491
+  },
+  {
+    "label": "candidate-extended-en",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/attempt-q4m-middle/candidate.qpack",
+      "-f",
+      "research/extended-holdout/en.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "20",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 9.796236038208008
+  }
+]
