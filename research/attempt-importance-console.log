@@ -1,0 +1,38 @@
+RUN sqrtimp build
+EXIT sqrtimp build 0
+RUN sqrtimp quantize
+EXIT sqrtimp quantize 0
+RUN sqrtimp selftest
+EXIT sqrtimp selftest 0
+RUN sqrtimp wiki-ru
+EXIT sqrtimp wiki-ru 0
+RUN sqrtimp wiki-en
+EXIT sqrtimp wiki-en 0
+RUN sqrtimp pilot-ru
+EXIT sqrtimp pilot-ru 0
+RUN sqrtimp pilot-en
+EXIT sqrtimp pilot-en 0
+RUN sqrtimp extended-ru
+EXIT sqrtimp extended-ru 0
+RUN sqrtimp extended-en
+EXIT sqrtimp extended-en 0
+DONE sqrtimp
+RUN uniformimp build
+EXIT uniformimp build 0
+RUN uniformimp quantize
+EXIT uniformimp quantize 0
+RUN uniformimp selftest
+EXIT uniformimp selftest 0
+RUN uniformimp wiki-ru
+EXIT uniformimp wiki-ru 0
+RUN uniformimp wiki-en
+EXIT uniformimp wiki-en 0
+RUN uniformimp pilot-ru
+EXIT uniformimp pilot-ru 0
+RUN uniformimp pilot-en
+EXIT uniformimp pilot-en 0
+RUN uniformimp extended-ru
+EXIT uniformimp extended-ru 0
+RUN uniformimp extended-en
+EXIT uniformimp extended-en 0
+DONE uniformimp

@@ -1,0 +1,160 @@
+[
+  {
+    "label": "build",
+    "args": [
+      "g++",
+      "-std=c++17",
+      "-O3",
+      "-march=native",
+      "-Iinclude",
+      "research/attempt-sqrtimp/quantize.cpp",
+      "build/libqpack.a",
+      "-pthread",
+      "-o",
+      "research/attempt-sqrtimp/quantize"
+    ],
+    "code": 0,
+    "seconds": 6.604278087615967
+  },
+  {
+    "label": "quantize",
+    "args": [
+      "research/attempt-sqrtimp/quantize",
+      "model.qpack",
+      "research/attempt-sqrtimp/candidate.qpack",
+      "--type",
+      "q4",
+      "--calib",
+      "research/matrix-20261102-003657/data/calib.txt",
+      "--calib-tokens",
+      "8192",
+      "--gptq",
+      "--act-order",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 49.35451698303223
+  },
+  {
+    "label": "selftest",
+    "args": [
+      "build/qpack-cli",
+      "-m",
+      "research/attempt-sqrtimp/candidate.qpack",
+      "--selftest",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 0.10734891891479492
+  },
+  {
+    "label": "wiki-ru",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/attempt-sqrtimp/candidate.qpack",
+      "-f",
+      "research/matrix-20261102-003657/data/eval-ru.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "8",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 3.409414768218994
+  },
+  {
+    "label": "wiki-en",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/attempt-sqrtimp/candidate.qpack",
+      "-f",
+      "research/matrix-20261102-003657/data/eval-en.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "8",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 3.8240177631378174
+  },
+  {
+    "label": "pilot-ru",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/attempt-sqrtimp/candidate.qpack",
+      "-f",
+      "research/baseline-20261102-001640/eval-ru.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "2",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 0.90779709815979
+  },
+  {
+    "label": "pilot-en",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/attempt-sqrtimp/candidate.qpack",
+      "-f",
+      "research/baseline-20261102-001640/eval-en.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "2",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 1.086709976196289
+  },
+  {
+    "label": "extended-ru",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/attempt-sqrtimp/candidate.qpack",
+      "-f",
+      "research/extended-holdout/ru.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "20",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 9.013070106506348
+  },
+  {
+    "label": "extended-en",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/attempt-sqrtimp/candidate.qpack",
+      "-f",
+      "research/extended-holdout/en.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "20",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 9.960304975509644
+  }
+]
