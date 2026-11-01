@@ -1,0 +1,21 @@
+RUN f16 ru
+DONE f16 ru 5100 26.5684
+RUN f16 en
+DONE f16 en 5100 9.8003
+RUN baseline ru
+DONE baseline ru 5100 26.6559
+RUN baseline en
+DONE baseline en 5100 9.8755
+RUN damp005 ru
+DONE damp005 ru 5100 26.6687
+RUN damp005 en
+DONE damp005 en 5100 9.8870
+RUN wide ru
+DONE wide ru 5100 26.6985
+RUN wide en
+DONE wide en 5100 9.8872
+RUN medium ru
+DONE medium ru 5100 26.7007
+RUN medium en
+DONE medium en 5100 9.8900
+COMPLETE

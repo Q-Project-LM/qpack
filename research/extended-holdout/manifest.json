@@ -1,0 +1,38 @@
+{
+  "ru": {
+    "sources": [
+      {
+        "title": "История",
+        "file": "research/matrix-20261102-003657/data/ru-6182161.txt",
+        "offset_chars": 12000,
+        "source_sha256": "5156f82d5703a68f3d0a248143592238c43445dc99a5bf1f7332f450efe0dc5a"
+      },
+      {
+        "title": "Астрономия",
+        "file": "research/matrix-20261102-003657/data/ru-588.txt",
+        "offset_chars": 12000,
+        "source_sha256": "b4312e27556a3df1b73744f532c68352489004938efc258b51673934feddbb0e"
+      }
+    ],
+    "sha256": "c7281d2691a86bb76e6bc57a91878199f097681a389f37c698207dbf9c588da1",
+    "bytes": 84439
+  },
+  "en": {
+    "sources": [
+      {
+        "title": "History",
+        "file": "research/matrix-20261102-003657/data/en-10772350.txt",
+        "offset_chars": 12000,
+        "source_sha256": "f12ee125d8483e4a8e966171a98c5614204a19d1342950408411870818026c8e"
+      },
+      {
+        "title": "Astronomy",
+        "file": "research/matrix-20261102-003657/data/en-50650.txt",
+        "offset_chars": 12000,
+        "source_sha256": "ba2952b73251d15662163567dd061b3a54ffb5c99a233804a5144760f4efeb54"
+      }
+    ],
+    "sha256": "35badf442613d4d4d299f29b6c573da63d75c4ada04ecf2fd439252a4501f665",
+    "bytes": 58188
+  }
+}

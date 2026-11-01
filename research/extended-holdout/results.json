@@ -1,0 +1,212 @@
+{
+  "f16": {
+    "ru": {
+      "tokens": 5100,
+      "nll": 3.27972,
+      "ppl": 26.5684,
+      "seconds": 12.344764471054077,
+      "command": [
+        "build/qpack-perplexity",
+        "-m",
+        "model.qpack",
+        "-f",
+        "research/extended-holdout/ru.txt",
+        "-c",
+        "256",
+        "--chunks",
+        "20",
+        "-t",
+        "8"
+      ],
+      "model_sha256": "1e22aafe3679970cdd136cbab1b99d60a3430f762d50a6ca69019391577d4c0c"
+    },
+    "en": {
+      "tokens": 5100,
+      "nll": 2.28242,
+      "ppl": 9.8003,
+      "seconds": 11.497269630432129,
+      "command": [
+        "build/qpack-perplexity",
+        "-m",
+        "model.qpack",
+        "-f",
+        "research/extended-holdout/en.txt",
+        "-c",
+        "256",
+        "--chunks",
+        "20",
+        "-t",
+        "8"
+      ],
+      "model_sha256": "1e22aafe3679970cdd136cbab1b99d60a3430f762d50a6ca69019391577d4c0c"
+    }
+  },
+  "baseline": {
+    "ru": {
+      "tokens": 5100,
+      "nll": 3.28301,
+      "ppl": 26.6559,
+      "seconds": 8.460675716400146,
+      "command": [
+        "build/qpack-perplexity",
+        "-m",
+        "research/matrix-20261102-003657/artifacts/q4-gptq-act-retry.qpack",
+        "-f",
+        "research/extended-holdout/ru.txt",
+        "-c",
+        "256",
+        "--chunks",
+        "20",
+        "-t",
+        "8"
+      ],
+      "model_sha256": "96e93f87d4d073853d34b8f194a77772c66a28e6135cb9a14da5d6fa73207b61"
+    },
+    "en": {
+      "tokens": 5100,
+      "nll": 2.29006,
+      "ppl": 9.8755,
+      "seconds": 8.452801942825317,
+      "command": [
+        "build/qpack-perplexity",
+        "-m",
+        "research/matrix-20261102-003657/artifacts/q4-gptq-act-retry.qpack",
+        "-f",
+        "research/extended-holdout/en.txt",
+        "-c",
+        "256",
+        "--chunks",
+        "20",
+        "-t",
+        "8"
+      ],
+      "model_sha256": "96e93f87d4d073853d34b8f194a77772c66a28e6135cb9a14da5d6fa73207b61"
+    }
+  },
+  "damp005": {
+    "ru": {
+      "tokens": 5100,
+      "nll": 3.28349,
+      "ppl": 26.6687,
+      "seconds": 9.018352508544922,
+      "command": [
+        "build/qpack-perplexity",
+        "-m",
+        "research/attempt-damp005/candidate.qpack",
+        "-f",
+        "research/extended-holdout/ru.txt",
+        "-c",
+        "256",
+        "--chunks",
+        "20",
+        "-t",
+        "8"
+      ],
+      "model_sha256": "fc2c5aabb198d59c1abaccad7ef008cb88685659e96f1c05c4e15bfe16674cc8"
+    },
+    "en": {
+      "tokens": 5100,
+      "nll": 2.29122,
+      "ppl": 9.887,
+      "seconds": 10.00911569595337,
+      "command": [
+        "build/qpack-perplexity",
+        "-m",
+        "research/attempt-damp005/candidate.qpack",
+        "-f",
+        "research/extended-holdout/en.txt",
+        "-c",
+        "256",
+        "--chunks",
+        "20",
+        "-t",
+        "8"
+      ],
+      "model_sha256": "fc2c5aabb198d59c1abaccad7ef008cb88685659e96f1c05c4e15bfe16674cc8"
+    }
+  },
+  "wide": {
+    "ru": {
+      "tokens": 5100,
+      "nll": 3.28461,
+      "ppl": 26.6985,
+      "seconds": 9.024786472320557,
+      "command": [
+        "build/qpack-perplexity",
+        "-m",
+        "research/attempt-wide-scales/candidate.qpack",
+        "-f",
+        "research/extended-holdout/ru.txt",
+        "-c",
+        "256",
+        "--chunks",
+        "20",
+        "-t",
+        "8"
+      ],
+      "model_sha256": "8ab5fb089821b41704ff11e94114b55841b2e36aea757311f8fe98b6f279d766"
+    },
+    "en": {
+      "tokens": 5100,
+      "nll": 2.29124,
+      "ppl": 9.8872,
+      "seconds": 10.030222177505493,
+      "command": [
+        "build/qpack-perplexity",
+        "-m",
+        "research/attempt-wide-scales/candidate.qpack",
+        "-f",
+        "research/extended-holdout/en.txt",
+        "-c",
+        "256",
+        "--chunks",
+        "20",
+        "-t",
+        "8"
+      ],
+      "model_sha256": "8ab5fb089821b41704ff11e94114b55841b2e36aea757311f8fe98b6f279d766"
+    }
+  },
+  "medium": {
+    "ru": {
+      "tokens": 5100,
+      "nll": 3.28469,
+      "ppl": 26.7007,
+      "seconds": 9.155104160308838,
+      "command": [
+        "build/qpack-perplexity",
+        "-m",
+        "research/attempt-medium-scales/candidate.qpack",
+        "-f",
+        "research/extended-holdout/ru.txt",
+        "-c",
+        "256",
+        "--chunks",
+        "20",
+        "-t",
+        "8"
+      ],
+      "model_sha256": "d5324fc614da18f5c2b7e28666854515067cc40c912d5ad0da3784e947c37abf"
+    },
+    "en": {
+      "tokens": 5100,
+      "nll": 2.29153,
+      "ppl": 9.89,
+      "seconds": 9.876157283782959,
+      "command": [
+        "build/qpack-perplexity",
+        "-m",
+        "research/attempt-medium-scales/candidate.qpack",
+        "-f",
+        "research/extended-holdout/en.txt",
+        "-c",
+        "256",
+        "--chunks",
+        "20",
+        "-t",
+        "8"
+      ],
+      "model_sha256": "d5324fc614da18f5c2b7e28666854515067cc40c912d5ad0da3784e947c37abf"
+    }
+  }
+}
