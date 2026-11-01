@@ -1,0 +1,38 @@
+{
+  "default": {
+    "tokens": 4080,
+    "nll": 3.02522,
+    "ppl": 20.5985,
+    "command": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/qwen-validation/artifacts/default.qpack",
+      "-f",
+      "research/qwen-fiction-holdout/alice.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "16",
+      "-t",
+      "8"
+    ]
+  },
+  "calib-4096": {
+    "tokens": 4080,
+    "nll": 3.01557,
+    "ppl": 20.4008,
+    "command": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/qwen-validation/artifacts/calib-4096.qpack",
+      "-f",
+      "research/qwen-fiction-holdout/alice.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "16",
+      "-t",
+      "8"
+    ]
+  }
+}

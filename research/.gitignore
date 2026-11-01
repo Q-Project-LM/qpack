@@ -5,3 +5,5 @@ attempt-*/quantize
 
 qwen-validation/hf/
 qwen-validation/artifacts/
+
+qwen-fiction-holdout/alice.txt

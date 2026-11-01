@@ -1,0 +1,42 @@
+RUN calib-4096-quantize
+EXIT calib-4096-quantize 0 seconds 210.9
+RUN calib-4096-selftest
+EXIT calib-4096-selftest 0 seconds 0.0
+RUN calib-4096-wiki-ru
+EXIT calib-4096-wiki-ru 0 seconds 20.6
+RUN calib-4096-wiki-en
+EXIT calib-4096-wiki-en 0 seconds 23.9
+RUN calib-4096-extended-ru
+EXIT calib-4096-extended-ru 0 seconds 20.2
+RUN calib-4096-extended-en
+EXIT calib-4096-extended-en 0 seconds 24.8
+{
+  "calib-4096": {
+    "bytes": 369546048,
+    "sha256": "d409c137267775dd4277164c95e71664af9029713c234b15e411057938cdc3e4",
+    "ppl": {
+      "wiki-ru": {
+        "tokens": 1020,
+        "nll": 2.33175,
+        "ppl": 10.296
+      },
+      "wiki-en": {
+        "tokens": 1020,
+        "nll": 2.73029,
+        "ppl": 15.3373
+      },
+      "extended-ru": {
+        "tokens": 1020,
+        "nll": 2.98074,
+        "ppl": 19.7023
+      },
+      "extended-en": {
+        "tokens": 1020,
+        "nll": 2.71598,
+        "ppl": 15.1195
+      }
+    },
+    "selftest_output": "research/qwen-validation/artifacts/calib-4096.qpack: llama:qwen2, vocab 151936, ctx 4096, loaded in 0.04 s, self-test 0/0 (max |dlogit| 0.00e+00), threads 8"
+  }
+}
+COMPLETE

@@ -1,0 +1,107 @@
+[
+  {
+    "label": "calib-4096-quantize",
+    "args": [
+      "build/qpack-quantize",
+      "research/qwen-validation/artifacts/qwen.f32.qpack",
+      "research/qwen-validation/artifacts/calib-4096.qpack",
+      "--type",
+      "q4m",
+      "--calib",
+      "research/matrix-20261102-003657/data/calib.txt",
+      "--calib-tokens",
+      "4096",
+      "--gptq",
+      "--act-order",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 210.86590027809143
+  },
+  {
+    "label": "calib-4096-selftest",
+    "args": [
+      "build/qpack-cli",
+      "-m",
+      "research/qwen-validation/artifacts/calib-4096.qpack",
+      "--selftest",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 0.047795772552490234
+  },
+  {
+    "label": "calib-4096-wiki-ru",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/qwen-validation/artifacts/calib-4096.qpack",
+      "-f",
+      "research/matrix-20261102-003657/data/eval-ru.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "4",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 20.56873059272766
+  },
+  {
+    "label": "calib-4096-wiki-en",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/qwen-validation/artifacts/calib-4096.qpack",
+      "-f",
+      "research/matrix-20261102-003657/data/eval-en.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "4",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 23.874133825302124
+  },
+  {
+    "label": "calib-4096-extended-ru",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/qwen-validation/artifacts/calib-4096.qpack",
+      "-f",
+      "research/extended-holdout/ru.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "4",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 20.207204818725586
+  },
+  {
+    "label": "calib-4096-extended-en",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/qwen-validation/artifacts/calib-4096.qpack",
+      "-f",
+      "research/extended-holdout/en.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "4",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 24.778554677963257
+  }
+]

@@ -25,3 +25,17 @@ Same source, calibration, q4m default allocation, size (369546048 bytes), evalua
 | extended EN | 15.3373 | 15.1339 |
 
 Two improvements and two regressions; no consistent winner. Keep baseline configuration and do not change the default based on these limited samples.
+
+## Follow-up: longer calibration
+
+Same f32 input, q4m GPTQ act-order, text and evaluation; request 4096 calibration tokens instead of 2044. The program reports 4088 actual tokens because it processes complete blocks. File sizes are identical at 369546048 bytes. Quantization took 210.9 seconds versus 179.5 seconds in this pair (single runs, not a robust timing benchmark).
+
+| Dataset | 2044 tokens | 4088 tokens |
+|---|---:|---:|
+| wiki RU | 10.4777 | 10.2960 |
+| wiki EN | 15.5078 | 15.3373 |
+| extended RU | 20.0007 | 19.7023 |
+| extended EN | 15.3373 | 15.1195 |
+| English fiction, 4080 tokens | 20.5985 | 20.4008 |
+
+The English fiction check was added after selecting this candidate; source and hashes are recorded in ../qwen-fiction-holdout/source.json. Selection and first four tests use short, partially related texts, so more datasets and architectures are needed. Quantized files still have no selftest cases. This is a calibration setting improvement on this model, not an algorithm or default change. See ../qwen-calib-4096/ and ../qwen-fiction-holdout/ for commands and logs.

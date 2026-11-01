@@ -64,3 +64,7 @@ Finished matrix-20261102-020806: 18/18 variants completed successfully; see SUMM
 ## Qwen2.5-0.5B-Instruct follow-up
 
 Compared default q4m GPTQ act-order with experimental last-half allocation at essentially equal size. Last-half regressed in 3/4 Russian/English evaluation sets. Kept the existing default for Qwen and documented that the opt-in is model-specific. A second experiment without act-order improved 2/4 sets but regressed in 2/4, so it does not establish a universal improvement. Transformer-reference f32 conversion passed 5/5 selftest; NumPy-converted quantized models have no embedded reference cases (0/0). Details, commands, source revision and metrics: qwen-validation/SUMMARY.md and qwen-no-act-order/.
+
+## Qwen: more calibration tokens
+
+Repeated baseline q4m GPTQ act-order with 4088 actual calibration tokens instead of 2044. Equal 369546048-byte files; lower perplexity on all four prior sets and a newly added 4080-token English fiction holdout. Single-run conversion time increased from 179.5s to 210.9s. This supports the longer calibration setting for this model, not a universal algorithmic improvement. Details: qwen-validation/SUMMARY.md.

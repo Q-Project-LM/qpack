@@ -1,0 +1,29 @@
+{
+  "calib-4096": {
+    "bytes": 369546048,
+    "sha256": "d409c137267775dd4277164c95e71664af9029713c234b15e411057938cdc3e4",
+    "ppl": {
+      "wiki-ru": {
+        "tokens": 1020,
+        "nll": 2.33175,
+        "ppl": 10.296
+      },
+      "wiki-en": {
+        "tokens": 1020,
+        "nll": 2.73029,
+        "ppl": 15.3373
+      },
+      "extended-ru": {
+        "tokens": 1020,
+        "nll": 2.98074,
+        "ppl": 19.7023
+      },
+      "extended-en": {
+        "tokens": 1020,
+        "nll": 2.71598,
+        "ppl": 15.1195
+      }
+    },
+    "selftest_output": "research/qwen-validation/artifacts/calib-4096.qpack: llama:qwen2, vocab 151936, ctx 4096, loaded in 0.04 s, self-test 0/0 (max |dlogit| 0.00e+00), threads 8"
+  }
+}

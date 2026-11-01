@@ -79,6 +79,8 @@ build/qpack-quantize model.f32.qpack model.q4m.qpack --type q4m --calib calib.tx
 
 Optional experimental `--q4m-last-half` (requires `--type q4m`) keeps the FFN down projections in the last half of layers at q8 instead of the default q4m layer selection. Value projections retain the usual q4m policy. It has shown a small PPL improvement for one N-Q model, but regressed on three of four Qwen2.5-0.5B-Instruct evaluation sets at essentially the same size. It is not recommended for Qwen based on these tests; see research/qwen-validation/SUMMARY.md. Omitting the flag preserves the default policy.
 
+On Qwen2.5-0.5B-Instruct, requesting `--calib-tokens 4096` improved PPL over 2044 tokens on the recorded evaluation texts at identical model size, at additional quantization time. Results may vary by model and calibration data; see `research/qwen-validation/SUMMARY.md`.
+
 The source can be f32, f16 or q8 (best: the unquantised file). Group scales are chosen by minimum (activation-weighted)
 squared error; `--gptq` quantises columns left to right and pushes each rounding error onto the remaining columns
 through the inverse of H = Σ x xᵀ collected on the calibration text (Frantar et al., 2022). The self-test of the output
