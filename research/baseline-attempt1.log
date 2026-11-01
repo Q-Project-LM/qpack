@@ -1,0 +1,4 @@
+  File "/workspace/qpack/research/run_baseline.py", line 35
+    with (r/'HISTORY.md').open('a') as f: f.write('
+                                                  ^
+SyntaxError: unterminated string literal (detected at line 35)

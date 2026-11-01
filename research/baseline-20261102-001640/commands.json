@@ -1,0 +1,56 @@
+[
+  {
+    "label": "quantize-q4",
+    "command": "./build/qpack-quantize model.qpack research/baseline-20261102-001640/artifacts/model.q4.qpack",
+    "returncode": 0,
+    "seconds": 1.3142127990722656
+  },
+  {
+    "label": "f16-selftest",
+    "command": "./build/qpack-cli -m model.qpack --selftest",
+    "returncode": 0,
+    "seconds": 0.14597749710083008
+  },
+  {
+    "label": "f16-bench",
+    "command": "./build/qpack-bench -m model.qpack -p 64 -n 128 -t 1,8 -r 3",
+    "returncode": 0,
+    "seconds": 4.268173694610596
+  },
+  {
+    "label": "f16-ppl-ru",
+    "command": "./build/qpack-perplexity -m model.qpack -f research/baseline-20261102-001640/eval-ru.txt -c 256 --chunks 2 -t 8",
+    "returncode": 0,
+    "seconds": 1.2996468544006348
+  },
+  {
+    "label": "f16-ppl-en",
+    "command": "./build/qpack-perplexity -m model.qpack -f research/baseline-20261102-001640/eval-en.txt -c 256 --chunks 2 -t 8",
+    "returncode": 0,
+    "seconds": 1.184807538986206
+  },
+  {
+    "label": "q4-selftest",
+    "command": "./build/qpack-cli -m research/baseline-20261102-001640/artifacts/model.q4.qpack --selftest",
+    "returncode": 0,
+    "seconds": 0.11354637145996094
+  },
+  {
+    "label": "q4-bench",
+    "command": "./build/qpack-bench -m research/baseline-20261102-001640/artifacts/model.q4.qpack -p 64 -n 128 -t 1,8 -r 3",
+    "returncode": 0,
+    "seconds": 2.437134027481079
+  },
+  {
+    "label": "q4-ppl-ru",
+    "command": "./build/qpack-perplexity -m research/baseline-20261102-001640/artifacts/model.q4.qpack -f research/baseline-20261102-001640/eval-ru.txt -c 256 --chunks 2 -t 8",
+    "returncode": 0,
+    "seconds": 0.9392738342285156
+  },
+  {
+    "label": "q4-ppl-en",
+    "command": "./build/qpack-perplexity -m research/baseline-20261102-001640/artifacts/model.q4.qpack -f research/baseline-20261102-001640/eval-en.txt -c 256 --chunks 2 -t 8",
+    "returncode": 0,
+    "seconds": 0.9978077411651611
+  }
+]

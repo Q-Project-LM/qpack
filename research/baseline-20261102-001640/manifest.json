@@ -1,0 +1,23 @@
+{
+  "created_moscow": "2026-11-02T00:16:40.883826+03:00",
+  "source": "model.qpack",
+  "source_sha256": "1e22aafe3679970cdd136cbab1b99d60a3430f762d50a6ca69019391577d4c0c",
+  "source_bytes": 93736125,
+  "commit": "e92b52f26f90dd5f00fa6ac2e98c373fce1bfa1a",
+  "branch": "improve-quantization",
+  "platform": "Linux-6.8.0-146-generic-x86_64-with-glibc2.39",
+  "cpus": 64,
+  "evaluation": "Assistant-authored RU/EN smoke prose. No calibration. ctx=256, max 2 chunks, 8 threads. Preliminary, not representative.",
+  "text_sha256": {
+    "ru": "59f817ca828251439bae2bd80bf106d3acdb86fc6ff0d2b3d3fab7930fcfcc51",
+    "en": "5e2965a8a414bb0830da9b3bd4b8f0e98483ce42f583110a110c527144ec12a6"
+  },
+  "benchmark_aggregation": "Separate best prompt/decode tok/s across 3 repetitions; synthetic token sequences, not end-to-end chat.",
+  "binary_sha256": {
+    "qpack-cli": "70950fc2c2aac4197b1daae772483d075a678cb66f9d4144c4c6ca45847a1842",
+    "qpack-quantize": "9cbf79f8b8557127ce0806345183dba2eb9ee042a9f556671c5e24492f666996",
+    "qpack-bench": "072251f5556a08b2be235913595a93c7d66d8852bbbce2d524ed26b3dc2513e3",
+    "qpack-perplexity": "767dd9559c6ca74160863ee217333ec8dbe0383c91c74f900b1f062d128436e2"
+  },
+  "runner_sha256": "7b59147b0c6b92f56fdf12184370112310dbff2fa6cf5bd8e61121a5c14e61b9"
+}

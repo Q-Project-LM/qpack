@@ -1,0 +1,1 @@
+model.qpack -> research/baseline-20261102-001640/artifacts/model.q4.qpack: 89.4 MiB -> 29.5 MiB, q4 37.9M / q8 8.5M / other 0.1M params, 1.3 s

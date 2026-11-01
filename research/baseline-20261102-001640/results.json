@@ -1,0 +1,36 @@
+[
+  {
+    "model": "f16",
+    "bytes": 93736125,
+    "sha256": "1e22aafe3679970cdd136cbab1b99d60a3430f762d50a6ca69019391577d4c0c",
+    "ppl": {
+      "ru": {
+        "tokens": 510,
+        "nll": 2.78448,
+        "perplexity": 16.1914
+      },
+      "en": {
+        "tokens": 510,
+        "nll": 2.47576,
+        "perplexity": 11.8907
+      }
+    }
+  },
+  {
+    "model": "q4",
+    "bytes": 30884992,
+    "sha256": "0cde501ad009803ab9478eb6dfab4f71010c13ffb487c76bc757e8b41a12edbf",
+    "ppl": {
+      "ru": {
+        "tokens": 510,
+        "nll": 2.80247,
+        "perplexity": 16.4853
+      },
+      "en": {
+        "tokens": 510,
+        "nll": 2.4885,
+        "perplexity": 12.0433
+      }
+    }
+  }
+]
