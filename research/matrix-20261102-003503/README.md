@@ -1,0 +1,1 @@
+Preparation cache from an interrupted Wikipedia download (HTTP429). No model experiment results in this folder. Article snapshots were reused by matrix-20261102-003657; source attribution and snapshot hashes are in that run data/sources.json.

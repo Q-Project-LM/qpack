@@ -1,0 +1,950 @@
+[
+  {
+    "label": "f16-selftest",
+    "command": "./build/qpack-cli -m model.qpack --selftest -t 8",
+    "returncode": 0,
+    "seconds": 0.1650108431931585
+  },
+  {
+    "label": "q8-quantize",
+    "command": "./build/qpack-quantize model.qpack research/matrix-20261102-003657/artifacts/q8.qpack -t 8 --type q8",
+    "returncode": 0,
+    "seconds": 0.6161810019984841
+  },
+  {
+    "label": "q8-selftest",
+    "command": "./build/qpack-cli -m research/matrix-20261102-003657/artifacts/q8.qpack --selftest -t 8",
+    "returncode": 0,
+    "seconds": 0.16489911498501897
+  },
+  {
+    "label": "q4-plain-quantize",
+    "command": "./build/qpack-quantize model.qpack research/matrix-20261102-003657/artifacts/q4-plain.qpack -t 8 --type q4",
+    "returncode": 0,
+    "seconds": 2.019034804077819
+  },
+  {
+    "label": "q4-plain-selftest",
+    "command": "./build/qpack-cli -m research/matrix-20261102-003657/artifacts/q4-plain.qpack --selftest -t 8",
+    "returncode": 0,
+    "seconds": 0.11477928492240608
+  },
+  {
+    "label": "q4-plain-head4-quantize",
+    "command": "./build/qpack-quantize model.qpack research/matrix-20261102-003657/artifacts/q4-plain-head4.qpack -t 8 --type q4 --q4-head",
+    "returncode": 0,
+    "seconds": 2.3201531369704753
+  },
+  {
+    "label": "q4-plain-head4-selftest",
+    "command": "./build/qpack-cli -m research/matrix-20261102-003657/artifacts/q4-plain-head4.qpack --selftest -t 8",
+    "returncode": 0,
+    "seconds": 0.16478600120171905
+  },
+  {
+    "label": "q4-calib-quantize",
+    "command": "./build/qpack-quantize model.qpack research/matrix-20261102-003657/artifacts/q4-calib.qpack -t 8 --type q4 --calib research/matrix-20261102-003657/data/calib.txt --calib-tokens 8192",
+    "returncode": 0,
+    "seconds": 7.535797703079879
+  },
+  {
+    "label": "q4-calib-selftest",
+    "command": "./build/qpack-cli -m research/matrix-20261102-003657/artifacts/q4-calib.qpack --selftest -t 8",
+    "returncode": 0,
+    "seconds": 0.11467492091469467
+  },
+  {
+    "label": "q4-calib-head4-quantize",
+    "command": "./build/qpack-quantize model.qpack research/matrix-20261102-003657/artifacts/q4-calib-head4.qpack -t 8 --type q4 --calib research/matrix-20261102-003657/data/calib.txt --calib-tokens 8192 --q4-head",
+    "returncode": 0,
+    "seconds": 8.037254363996908
+  },
+  {
+    "label": "q4-calib-head4-selftest",
+    "command": "./build/qpack-cli -m research/matrix-20261102-003657/artifacts/q4-calib-head4.qpack --selftest -t 8",
+    "returncode": 0,
+    "seconds": 0.1145859060343355
+  },
+  {
+    "label": "f16-selftest",
+    "command": "./build/qpack-cli -m model.qpack --selftest -t 8",
+    "log": "research/matrix-20261102-003657/logs/f16-selftest-retry1.log",
+    "returncode": 0,
+    "seconds": 0.1654445210006088
+  },
+  {
+    "label": "q8-selftest",
+    "command": "./build/qpack-cli -m research/matrix-20261102-003657/artifacts/q8.qpack --selftest -t 8",
+    "log": "research/matrix-20261102-003657/logs/q8-selftest-retry1.log",
+    "returncode": 0,
+    "seconds": 0.16500087501481175
+  },
+  {
+    "label": "q4-plain-selftest",
+    "command": "./build/qpack-cli -m research/matrix-20261102-003657/artifacts/q4-plain.qpack --selftest -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-plain-selftest-retry1.log",
+    "returncode": 0,
+    "seconds": 0.11474699201062322
+  },
+  {
+    "label": "q4-plain-head4-selftest",
+    "command": "./build/qpack-cli -m research/matrix-20261102-003657/artifacts/q4-plain-head4.qpack --selftest -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-plain-head4-selftest-retry1.log",
+    "returncode": 0,
+    "seconds": 0.16506297001615167
+  },
+  {
+    "label": "q4-calib-selftest",
+    "command": "./build/qpack-cli -m research/matrix-20261102-003657/artifacts/q4-calib.qpack --selftest -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-calib-selftest-retry1.log",
+    "returncode": 0,
+    "seconds": 0.11493091308511794
+  },
+  {
+    "label": "q4-calib-head4-selftest",
+    "command": "./build/qpack-cli -m research/matrix-20261102-003657/artifacts/q4-calib-head4.qpack --selftest -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-calib-head4-selftest-retry1.log",
+    "returncode": 0,
+    "seconds": 0.11513868207111955
+  },
+  {
+    "label": "f16-selftest",
+    "command": "./build/qpack-cli -m model.qpack --selftest -t 8",
+    "log": "research/matrix-20261102-003657/logs/f16-selftest-retry2.log",
+    "returncode": 0,
+    "seconds": 0.16535701719112694
+  },
+  {
+    "label": "f16-ppl-ru",
+    "command": "./build/qpack-perplexity -m model.qpack -f research/matrix-20261102-003657/data/eval-ru.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/f16-ppl-ru.log",
+    "returncode": 0,
+    "seconds": 4.782778084045276
+  },
+  {
+    "label": "f16-ppl-en",
+    "command": "./build/qpack-perplexity -m model.qpack -f research/matrix-20261102-003657/data/eval-en.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/f16-ppl-en.log",
+    "returncode": 0,
+    "seconds": 5.334909731056541
+  },
+  {
+    "label": "f16-pilot_ppl-ru",
+    "command": "./build/qpack-perplexity -m model.qpack -f research/baseline-20261102-001640/eval-ru.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/f16-pilot_ppl-ru.log",
+    "returncode": 0,
+    "seconds": 1.4195570009760559
+  },
+  {
+    "label": "f16-pilot_ppl-en",
+    "command": "./build/qpack-perplexity -m model.qpack -f research/baseline-20261102-001640/eval-en.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/f16-pilot_ppl-en.log",
+    "returncode": 0,
+    "seconds": 1.4195172570180148
+  },
+  {
+    "label": "f16-bench",
+    "command": "./build/qpack-bench -m model.qpack -p 64 -n 128 -t 1,8,16 -r 3",
+    "log": "research/matrix-20261102-003657/logs/f16-bench.log",
+    "returncode": 0,
+    "seconds": 5.784651400055736
+  },
+  {
+    "label": "q8-selftest",
+    "command": "./build/qpack-cli -m research/matrix-20261102-003657/artifacts/q8.qpack --selftest -t 8",
+    "log": "research/matrix-20261102-003657/logs/q8-selftest-retry2.log",
+    "returncode": 0,
+    "seconds": 0.21530160680413246
+  },
+  {
+    "label": "q8-ppl-ru",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q8.qpack -f research/matrix-20261102-003657/data/eval-ru.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q8-ppl-ru.log",
+    "returncode": 0,
+    "seconds": 4.380149737931788
+  },
+  {
+    "label": "q8-ppl-en",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q8.qpack -f research/matrix-20261102-003657/data/eval-en.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q8-ppl-en.log",
+    "returncode": 0,
+    "seconds": 4.78164666891098
+  },
+  {
+    "label": "q8-pilot_ppl-ru",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q8.qpack -f research/baseline-20261102-001640/eval-ru.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q8-pilot_ppl-ru.log",
+    "returncode": 0,
+    "seconds": 1.118182945996523
+  },
+  {
+    "label": "q8-pilot_ppl-en",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q8.qpack -f research/baseline-20261102-001640/eval-en.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q8-pilot_ppl-en.log",
+    "returncode": 0,
+    "seconds": 1.268571482039988
+  },
+  {
+    "label": "q8-bench",
+    "command": "./build/qpack-bench -m research/matrix-20261102-003657/artifacts/q8.qpack -p 64 -n 128 -t 1,8,16 -r 3",
+    "log": "research/matrix-20261102-003657/logs/q8-bench.log",
+    "returncode": 0,
+    "seconds": 5.983299938030541
+  },
+  {
+    "label": "q4-plain-selftest",
+    "command": "./build/qpack-cli -m research/matrix-20261102-003657/artifacts/q4-plain.qpack --selftest -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-plain-selftest-retry2.log",
+    "returncode": 0,
+    "seconds": 0.11485089687630534
+  },
+  {
+    "label": "q4-plain-ppl-ru",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4-plain.qpack -f research/matrix-20261102-003657/data/eval-ru.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-plain-ppl-ru.log",
+    "returncode": 0,
+    "seconds": 3.473580032819882
+  },
+  {
+    "label": "q4-plain-ppl-en",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4-plain.qpack -f research/matrix-20261102-003657/data/eval-en.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-plain-ppl-en.log",
+    "returncode": 0,
+    "seconds": 3.8249152079224586
+  },
+  {
+    "label": "q4-plain-pilot_ppl-ru",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4-plain.qpack -f research/baseline-20261102-001640/eval-ru.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-plain-pilot_ppl-ru.log",
+    "returncode": 0,
+    "seconds": 0.9668543399311602
+  },
+  {
+    "label": "q4-plain-pilot_ppl-en",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4-plain.qpack -f research/baseline-20261102-001640/eval-en.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-plain-pilot_ppl-en.log",
+    "returncode": 0,
+    "seconds": 1.0170796739403158
+  },
+  {
+    "label": "q4-plain-bench",
+    "command": "./build/qpack-bench -m research/matrix-20261102-003657/artifacts/q4-plain.qpack -p 64 -n 128 -t 1,8,16 -r 3",
+    "log": "research/matrix-20261102-003657/logs/q4-plain-bench.log",
+    "returncode": 0,
+    "seconds": 3.1228025960735977
+  },
+  {
+    "label": "q4-plain-head4-selftest",
+    "command": "./build/qpack-cli -m research/matrix-20261102-003657/artifacts/q4-plain-head4.qpack --selftest -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-plain-head4-selftest-retry2.log",
+    "returncode": 0,
+    "seconds": 0.16483638691715896
+  },
+  {
+    "label": "q4-plain-head4-ppl-ru",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4-plain-head4.qpack -f research/matrix-20261102-003657/data/eval-ru.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-plain-head4-ppl-ru.log",
+    "returncode": 0,
+    "seconds": 3.9251705578062683
+  },
+  {
+    "label": "q4-plain-head4-ppl-en",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4-plain-head4.qpack -f research/matrix-20261102-003657/data/eval-en.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-plain-head4-ppl-en.log",
+    "returncode": 0,
+    "seconds": 3.7744804329704493
+  },
+  {
+    "label": "q4-plain-head4-pilot_ppl-ru",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4-plain-head4.qpack -f research/baseline-20261102-001640/eval-ru.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-plain-head4-pilot_ppl-ru.log",
+    "returncode": 0,
+    "seconds": 0.9167223419062793
+  },
+  {
+    "label": "q4-plain-head4-pilot_ppl-en",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4-plain-head4.qpack -f research/baseline-20261102-001640/eval-en.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-plain-head4-pilot_ppl-en.log",
+    "returncode": 0,
+    "seconds": 1.0171256018802524
+  },
+  {
+    "label": "q4-plain-head4-bench",
+    "command": "./build/qpack-bench -m research/matrix-20261102-003657/artifacts/q4-plain-head4.qpack -p 64 -n 128 -t 1,8,16 -r 3",
+    "log": "research/matrix-20261102-003657/logs/q4-plain-head4-bench.log",
+    "returncode": 0,
+    "seconds": 3.3250783120747656
+  },
+  {
+    "label": "q4-calib-selftest",
+    "command": "./build/qpack-cli -m research/matrix-20261102-003657/artifacts/q4-calib.qpack --selftest -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-calib-selftest-retry2.log",
+    "returncode": 0,
+    "seconds": 0.11487204302102327
+  },
+  {
+    "label": "q4-calib-ppl-ru",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4-calib.qpack -f research/matrix-20261102-003657/data/eval-ru.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-calib-ppl-ru.log",
+    "returncode": 0,
+    "seconds": 3.625473832944408
+  },
+  {
+    "label": "q4-calib-ppl-en",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4-calib.qpack -f research/matrix-20261102-003657/data/eval-en.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-calib-ppl-en.log",
+    "returncode": 0,
+    "seconds": 3.8250401681289077
+  },
+  {
+    "label": "q4-calib-pilot_ppl-ru",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4-calib.qpack -f research/baseline-20261102-001640/eval-ru.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-calib-pilot_ppl-ru.log",
+    "returncode": 0,
+    "seconds": 0.9167252590414137
+  },
+  {
+    "label": "q4-calib-pilot_ppl-en",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4-calib.qpack -f research/baseline-20261102-001640/eval-en.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-calib-pilot_ppl-en.log",
+    "returncode": 0,
+    "seconds": 1.0677404769230634
+  },
+  {
+    "label": "q4-calib-bench",
+    "command": "./build/qpack-bench -m research/matrix-20261102-003657/artifacts/q4-calib.qpack -p 64 -n 128 -t 1,8,16 -r 3",
+    "log": "research/matrix-20261102-003657/logs/q4-calib-bench.log",
+    "returncode": 0,
+    "seconds": 3.4242045308928937
+  },
+  {
+    "label": "q4-calib-head4-selftest",
+    "command": "./build/qpack-cli -m research/matrix-20261102-003657/artifacts/q4-calib-head4.qpack --selftest -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-calib-head4-selftest-retry2.log",
+    "returncode": 0,
+    "seconds": 0.1148403249680996
+  },
+  {
+    "label": "q4-calib-head4-ppl-ru",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4-calib-head4.qpack -f research/matrix-20261102-003657/data/eval-ru.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-calib-head4-ppl-ru.log",
+    "returncode": 0,
+    "seconds": 3.5269764768891037
+  },
+  {
+    "label": "q4-calib-head4-ppl-en",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4-calib-head4.qpack -f research/matrix-20261102-003657/data/eval-en.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-calib-head4-ppl-en.log",
+    "returncode": 0,
+    "seconds": 3.8765062210150063
+  },
+  {
+    "label": "q4-calib-head4-pilot_ppl-ru",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4-calib-head4.qpack -f research/baseline-20261102-001640/eval-ru.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-calib-head4-pilot_ppl-ru.log",
+    "returncode": 0,
+    "seconds": 0.9671473409980536
+  },
+  {
+    "label": "q4-calib-head4-pilot_ppl-en",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4-calib-head4.qpack -f research/baseline-20261102-001640/eval-en.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-calib-head4-pilot_ppl-en.log",
+    "returncode": 0,
+    "seconds": 1.117010700982064
+  },
+  {
+    "label": "q4-calib-head4-bench",
+    "command": "./build/qpack-bench -m research/matrix-20261102-003657/artifacts/q4-calib-head4.qpack -p 64 -n 128 -t 1,8,16 -r 3",
+    "log": "research/matrix-20261102-003657/logs/q4-calib-head4-bench.log",
+    "returncode": 0,
+    "seconds": 3.373882362153381
+  },
+  {
+    "label": "q4-gptq-quantize",
+    "command": "./build/qpack-quantize model.qpack research/matrix-20261102-003657/artifacts/q4-gptq-retry.qpack -t 8 --type q4 --calib research/matrix-20261102-003657/data/calib.txt --calib-tokens 8192 --gptq",
+    "log": "research/matrix-20261102-003657/logs/q4-gptq-quantize-retry2.log",
+    "returncode": 0,
+    "seconds": 49.616892458172515
+  },
+  {
+    "label": "q4-gptq-selftest",
+    "command": "./build/qpack-cli -m research/matrix-20261102-003657/artifacts/q4-gptq-retry.qpack --selftest -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-gptq-selftest.log",
+    "returncode": 0,
+    "seconds": 0.11705401702784002
+  },
+  {
+    "label": "q4-gptq-ppl-ru",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4-gptq-retry.qpack -f research/matrix-20261102-003657/data/eval-ru.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-gptq-ppl-ru.log",
+    "returncode": 0,
+    "seconds": 3.6258361539803445
+  },
+  {
+    "label": "q4-gptq-ppl-en",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4-gptq-retry.qpack -f research/matrix-20261102-003657/data/eval-en.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-gptq-ppl-en.log",
+    "returncode": 0,
+    "seconds": 3.774734992068261
+  },
+  {
+    "label": "q4-gptq-pilot_ppl-ru",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4-gptq-retry.qpack -f research/baseline-20261102-001640/eval-ru.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-gptq-pilot_ppl-ru.log",
+    "returncode": 0,
+    "seconds": 0.9167520280461758
+  },
+  {
+    "label": "q4-gptq-pilot_ppl-en",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4-gptq-retry.qpack -f research/baseline-20261102-001640/eval-en.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-gptq-pilot_ppl-en.log",
+    "returncode": 0,
+    "seconds": 1.0673352959565818
+  },
+  {
+    "label": "q4-gptq-bench",
+    "command": "./build/qpack-bench -m research/matrix-20261102-003657/artifacts/q4-gptq-retry.qpack -p 64 -n 128 -t 1,8,16 -r 3",
+    "log": "research/matrix-20261102-003657/logs/q4-gptq-bench.log",
+    "returncode": 0,
+    "seconds": 3.5243807770311832
+  },
+  {
+    "label": "q4-gptq-head4-quantize",
+    "command": "./build/qpack-quantize model.qpack research/matrix-20261102-003657/artifacts/q4-gptq-head4-retry.qpack -t 8 --type q4 --calib research/matrix-20261102-003657/data/calib.txt --calib-tokens 8192 --gptq --q4-head",
+    "log": "research/matrix-20261102-003657/logs/q4-gptq-head4-quantize.log",
+    "returncode": 0,
+    "seconds": 49.987387001980096
+  },
+  {
+    "label": "q4-gptq-head4-selftest",
+    "command": "./build/qpack-cli -m research/matrix-20261102-003657/artifacts/q4-gptq-head4-retry.qpack --selftest -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-gptq-head4-selftest.log",
+    "returncode": 0,
+    "seconds": 0.11485407291911542
+  },
+  {
+    "label": "q4-gptq-head4-ppl-ru",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4-gptq-head4-retry.qpack -f research/matrix-20261102-003657/data/eval-ru.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-gptq-head4-ppl-ru.log",
+    "returncode": 0,
+    "seconds": 3.474134498042986
+  },
+  {
+    "label": "q4-gptq-head4-ppl-en",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4-gptq-head4-retry.qpack -f research/matrix-20261102-003657/data/eval-en.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-gptq-head4-ppl-en.log",
+    "returncode": 0,
+    "seconds": 3.8249621561262757
+  },
+  {
+    "label": "q4-gptq-head4-pilot_ppl-ru",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4-gptq-head4-retry.qpack -f research/baseline-20261102-001640/eval-ru.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-gptq-head4-pilot_ppl-ru.log",
+    "returncode": 0,
+    "seconds": 0.9670336279086769
+  },
+  {
+    "label": "q4-gptq-head4-pilot_ppl-en",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4-gptq-head4-retry.qpack -f research/baseline-20261102-001640/eval-en.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-gptq-head4-pilot_ppl-en.log",
+    "returncode": 0,
+    "seconds": 1.1189436428248882
+  },
+  {
+    "label": "q4-gptq-head4-bench",
+    "command": "./build/qpack-bench -m research/matrix-20261102-003657/artifacts/q4-gptq-head4-retry.qpack -p 64 -n 128 -t 1,8,16 -r 3",
+    "log": "research/matrix-20261102-003657/logs/q4-gptq-head4-bench.log",
+    "returncode": 0,
+    "seconds": 3.3239191251341254
+  },
+  {
+    "label": "q4-gptq-act-quantize",
+    "command": "./build/qpack-quantize model.qpack research/matrix-20261102-003657/artifacts/q4-gptq-act-retry.qpack -t 8 --type q4 --calib research/matrix-20261102-003657/data/calib.txt --calib-tokens 8192 --gptq --act-order",
+    "log": "research/matrix-20261102-003657/logs/q4-gptq-act-quantize.log",
+    "returncode": 0,
+    "seconds": 50.070758268935606
+  },
+  {
+    "label": "q4-gptq-act-selftest",
+    "command": "./build/qpack-cli -m research/matrix-20261102-003657/artifacts/q4-gptq-act-retry.qpack --selftest -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-gptq-act-selftest.log",
+    "returncode": 0,
+    "seconds": 0.11501101800240576
+  },
+  {
+    "label": "q4-gptq-act-ppl-ru",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4-gptq-act-retry.qpack -f research/matrix-20261102-003657/data/eval-ru.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-gptq-act-ppl-ru.log",
+    "returncode": 0,
+    "seconds": 3.6729520990047604
+  },
+  {
+    "label": "q4-gptq-act-ppl-en",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4-gptq-act-retry.qpack -f research/matrix-20261102-003657/data/eval-en.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-gptq-act-ppl-en.log",
+    "returncode": 0,
+    "seconds": 3.9241921741049737
+  },
+  {
+    "label": "q4-gptq-act-pilot_ppl-ru",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4-gptq-act-retry.qpack -f research/baseline-20261102-001640/eval-ru.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-gptq-act-pilot_ppl-ru.log",
+    "returncode": 0,
+    "seconds": 0.9172582761384547
+  },
+  {
+    "label": "q4-gptq-act-pilot_ppl-en",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4-gptq-act-retry.qpack -f research/baseline-20261102-001640/eval-en.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-gptq-act-pilot_ppl-en.log",
+    "returncode": 0,
+    "seconds": 1.0676070069894195
+  },
+  {
+    "label": "q4-gptq-act-bench",
+    "command": "./build/qpack-bench -m research/matrix-20261102-003657/artifacts/q4-gptq-act-retry.qpack -p 64 -n 128 -t 1,8,16 -r 3",
+    "log": "research/matrix-20261102-003657/logs/q4-gptq-act-bench.log",
+    "returncode": 0,
+    "seconds": 3.424780758097768
+  },
+  {
+    "label": "q4-gptq-act-head4-quantize",
+    "command": "./build/qpack-quantize model.qpack research/matrix-20261102-003657/artifacts/q4-gptq-act-head4-retry.qpack -t 8 --type q4 --calib research/matrix-20261102-003657/data/calib.txt --calib-tokens 8192 --gptq --act-order --q4-head",
+    "log": "research/matrix-20261102-003657/logs/q4-gptq-act-head4-quantize.log",
+    "returncode": 0,
+    "seconds": 50.028280918020755
+  },
+  {
+    "label": "q4-gptq-act-head4-selftest",
+    "command": "./build/qpack-cli -m research/matrix-20261102-003657/artifacts/q4-gptq-act-head4-retry.qpack --selftest -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-gptq-act-head4-selftest.log",
+    "returncode": 0,
+    "seconds": 0.11665683705359697
+  },
+  {
+    "label": "q4-gptq-act-head4-ppl-ru",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4-gptq-act-head4-retry.qpack -f research/matrix-20261102-003657/data/eval-ru.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-gptq-act-head4-ppl-ru.log",
+    "returncode": 0,
+    "seconds": 3.474647969007492
+  },
+  {
+    "label": "q4-gptq-act-head4-ppl-en",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4-gptq-act-head4-retry.qpack -f research/matrix-20261102-003657/data/eval-en.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-gptq-act-head4-ppl-en.log",
+    "returncode": 0,
+    "seconds": 3.8757954018656164
+  },
+  {
+    "label": "q4-gptq-act-head4-pilot_ppl-ru",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4-gptq-act-head4-retry.qpack -f research/baseline-20261102-001640/eval-ru.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-gptq-act-head4-pilot_ppl-ru.log",
+    "returncode": 0,
+    "seconds": 0.9673999310471117
+  },
+  {
+    "label": "q4-gptq-act-head4-pilot_ppl-en",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4-gptq-act-head4-retry.qpack -f research/baseline-20261102-001640/eval-en.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4-gptq-act-head4-pilot_ppl-en.log",
+    "returncode": 0,
+    "seconds": 1.1175267880316824
+  },
+  {
+    "label": "q4-gptq-act-head4-bench",
+    "command": "./build/qpack-bench -m research/matrix-20261102-003657/artifacts/q4-gptq-act-head4-retry.qpack -p 64 -n 128 -t 1,8,16 -r 3",
+    "log": "research/matrix-20261102-003657/logs/q4-gptq-act-head4-bench.log",
+    "returncode": 0,
+    "seconds": 3.373886205954477
+  },
+  {
+    "label": "q4m-plain-quantize",
+    "command": "./build/qpack-quantize model.qpack research/matrix-20261102-003657/artifacts/q4m-plain-retry.qpack -t 8 --type q4m",
+    "log": "research/matrix-20261102-003657/logs/q4m-plain-quantize.log",
+    "returncode": 0,
+    "seconds": 1.8691547960042953
+  },
+  {
+    "label": "q4m-plain-selftest",
+    "command": "./build/qpack-cli -m research/matrix-20261102-003657/artifacts/q4m-plain-retry.qpack --selftest -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-plain-selftest.log",
+    "returncode": 0,
+    "seconds": 0.11514529306441545
+  },
+  {
+    "label": "q4m-plain-ppl-ru",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4m-plain-retry.qpack -f research/matrix-20261102-003657/data/eval-ru.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-plain-ppl-ru.log",
+    "returncode": 0,
+    "seconds": 3.575406925054267
+  },
+  {
+    "label": "q4m-plain-ppl-en",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4m-plain-retry.qpack -f research/matrix-20261102-003657/data/eval-en.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-plain-ppl-en.log",
+    "returncode": 0,
+    "seconds": 3.883413742063567
+  },
+  {
+    "label": "q4m-plain-pilot_ppl-ru",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4m-plain-retry.qpack -f research/baseline-20261102-001640/eval-ru.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-plain-pilot_ppl-ru.log",
+    "returncode": 0,
+    "seconds": 0.9675462918821722
+  },
+  {
+    "label": "q4m-plain-pilot_ppl-en",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4m-plain-retry.qpack -f research/baseline-20261102-001640/eval-en.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-plain-pilot_ppl-en.log",
+    "returncode": 0,
+    "seconds": 1.0175868030637503
+  },
+  {
+    "label": "q4m-plain-bench",
+    "command": "./build/qpack-bench -m research/matrix-20261102-003657/artifacts/q4m-plain-retry.qpack -p 64 -n 128 -t 1,8,16 -r 3",
+    "log": "research/matrix-20261102-003657/logs/q4m-plain-bench.log",
+    "returncode": 0,
+    "seconds": 3.324734967201948
+  },
+  {
+    "label": "q4m-plain-head4-quantize",
+    "command": "./build/qpack-quantize model.qpack research/matrix-20261102-003657/artifacts/q4m-plain-head4-retry.qpack -t 8 --type q4m --q4-head",
+    "log": "research/matrix-20261102-003657/logs/q4m-plain-head4-quantize.log",
+    "returncode": 0,
+    "seconds": 2.1723783889319748
+  },
+  {
+    "label": "q4m-plain-head4-selftest",
+    "command": "./build/qpack-cli -m research/matrix-20261102-003657/artifacts/q4m-plain-head4-retry.qpack --selftest -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-plain-head4-selftest.log",
+    "returncode": 0,
+    "seconds": 0.11493894411250949
+  },
+  {
+    "label": "q4m-plain-head4-ppl-ru",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4m-plain-head4-retry.qpack -f research/matrix-20261102-003657/data/eval-ru.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-plain-head4-ppl-ru.log",
+    "returncode": 0,
+    "seconds": 3.525379410944879
+  },
+  {
+    "label": "q4m-plain-head4-ppl-en",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4m-plain-head4-retry.qpack -f research/matrix-20261102-003657/data/eval-en.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-plain-head4-ppl-en.log",
+    "returncode": 0,
+    "seconds": 3.8269403530284762
+  },
+  {
+    "label": "q4m-plain-head4-pilot_ppl-ru",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4m-plain-head4-retry.qpack -f research/baseline-20261102-001640/eval-ru.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-plain-head4-pilot_ppl-ru.log",
+    "returncode": 0,
+    "seconds": 0.9173349090851843
+  },
+  {
+    "label": "q4m-plain-head4-pilot_ppl-en",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4m-plain-head4-retry.qpack -f research/baseline-20261102-001640/eval-en.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-plain-head4-pilot_ppl-en.log",
+    "returncode": 0,
+    "seconds": 1.0178616801276803
+  },
+  {
+    "label": "q4m-plain-head4-bench",
+    "command": "./build/qpack-bench -m research/matrix-20261102-003657/artifacts/q4m-plain-head4-retry.qpack -p 64 -n 128 -t 1,8,16 -r 3",
+    "log": "research/matrix-20261102-003657/logs/q4m-plain-head4-bench.log",
+    "returncode": 0,
+    "seconds": 3.5759960010182112
+  },
+  {
+    "label": "q4m-calib-quantize",
+    "command": "./build/qpack-quantize model.qpack research/matrix-20261102-003657/artifacts/q4m-calib-retry.qpack -t 8 --type q4m --calib research/matrix-20261102-003657/data/calib.txt --calib-tokens 8192",
+    "log": "research/matrix-20261102-003657/logs/q4m-calib-quantize.log",
+    "returncode": 0,
+    "seconds": 7.538576694903895
+  },
+  {
+    "label": "q4m-calib-selftest",
+    "command": "./build/qpack-cli -m research/matrix-20261102-003657/artifacts/q4m-calib-retry.qpack --selftest -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-calib-selftest.log",
+    "returncode": 0,
+    "seconds": 0.11506448918953538
+  },
+  {
+    "label": "q4m-calib-ppl-ru",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4m-calib-retry.qpack -f research/matrix-20261102-003657/data/eval-ru.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-calib-ppl-ru.log",
+    "returncode": 0,
+    "seconds": 3.4754697598982602
+  },
+  {
+    "label": "q4m-calib-ppl-en",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4m-calib-retry.qpack -f research/matrix-20261102-003657/data/eval-en.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-calib-ppl-en.log",
+    "returncode": 0,
+    "seconds": 3.877372457878664
+  },
+  {
+    "label": "q4m-calib-pilot_ppl-ru",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4m-calib-retry.qpack -f research/baseline-20261102-001640/eval-ru.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-calib-pilot_ppl-ru.log",
+    "returncode": 0,
+    "seconds": 0.9678200811613351
+  },
+  {
+    "label": "q4m-calib-pilot_ppl-en",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4m-calib-retry.qpack -f research/baseline-20261102-001640/eval-en.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-calib-pilot_ppl-en.log",
+    "returncode": 0,
+    "seconds": 1.1178473678883165
+  },
+  {
+    "label": "q4m-calib-bench",
+    "command": "./build/qpack-bench -m research/matrix-20261102-003657/artifacts/q4m-calib-retry.qpack -p 64 -n 128 -t 1,8,16 -r 3",
+    "log": "research/matrix-20261102-003657/logs/q4m-calib-bench.log",
+    "returncode": 0,
+    "seconds": 3.475225450936705
+  },
+  {
+    "label": "q4m-calib-head4-quantize",
+    "command": "./build/qpack-quantize model.qpack research/matrix-20261102-003657/artifacts/q4m-calib-head4-retry.qpack -t 8 --type q4m --calib research/matrix-20261102-003657/data/calib.txt --calib-tokens 8192 --q4-head",
+    "log": "research/matrix-20261102-003657/logs/q4m-calib-head4-quantize.log",
+    "returncode": 0,
+    "seconds": 7.8899692830163985
+  },
+  {
+    "label": "q4m-calib-head4-selftest",
+    "command": "./build/qpack-cli -m research/matrix-20261102-003657/artifacts/q4m-calib-head4-retry.qpack --selftest -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-calib-head4-selftest.log",
+    "returncode": 0,
+    "seconds": 0.11492371605709195
+  },
+  {
+    "label": "q4m-calib-head4-ppl-ru",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4m-calib-head4-retry.qpack -f research/matrix-20261102-003657/data/eval-ru.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-calib-head4-ppl-ru.log",
+    "returncode": 0,
+    "seconds": 3.6270368108525872
+  },
+  {
+    "label": "q4m-calib-head4-ppl-en",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4m-calib-head4-retry.qpack -f research/matrix-20261102-003657/data/eval-en.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-calib-head4-ppl-en.log",
+    "returncode": 0,
+    "seconds": 3.9280128139071167
+  },
+  {
+    "label": "q4m-calib-head4-pilot_ppl-ru",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4m-calib-head4-retry.qpack -f research/baseline-20261102-001640/eval-ru.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-calib-head4-pilot_ppl-ru.log",
+    "returncode": 0,
+    "seconds": 0.9673322029411793
+  },
+  {
+    "label": "q4m-calib-head4-pilot_ppl-en",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4m-calib-head4-retry.qpack -f research/baseline-20261102-001640/eval-en.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-calib-head4-pilot_ppl-en.log",
+    "returncode": 0,
+    "seconds": 1.0675423350185156
+  },
+  {
+    "label": "q4m-calib-head4-bench",
+    "command": "./build/qpack-bench -m research/matrix-20261102-003657/artifacts/q4m-calib-head4-retry.qpack -p 64 -n 128 -t 1,8,16 -r 3",
+    "log": "research/matrix-20261102-003657/logs/q4m-calib-head4-bench.log",
+    "returncode": 0,
+    "seconds": 3.4765021211933345
+  },
+  {
+    "label": "q4m-gptq-quantize",
+    "command": "./build/qpack-quantize model.qpack research/matrix-20261102-003657/artifacts/q4m-gptq-retry.qpack -t 8 --type q4m --calib research/matrix-20261102-003657/data/calib.txt --calib-tokens 8192 --gptq",
+    "log": "research/matrix-20261102-003657/logs/q4m-gptq-quantize.log",
+    "returncode": 0,
+    "seconds": 49.171933157136664
+  },
+  {
+    "label": "q4m-gptq-selftest",
+    "command": "./build/qpack-cli -m research/matrix-20261102-003657/artifacts/q4m-gptq-retry.qpack --selftest -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-gptq-selftest.log",
+    "returncode": 0,
+    "seconds": 0.16512028500437737
+  },
+  {
+    "label": "q4m-gptq-ppl-ru",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4m-gptq-retry.qpack -f research/matrix-20261102-003657/data/eval-ru.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-gptq-ppl-ru.log",
+    "returncode": 0,
+    "seconds": 3.4746207690332085
+  },
+  {
+    "label": "q4m-gptq-ppl-en",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4m-gptq-retry.qpack -f research/matrix-20261102-003657/data/eval-en.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-gptq-ppl-en.log",
+    "returncode": 0,
+    "seconds": 3.8250329869333655
+  },
+  {
+    "label": "q4m-gptq-pilot_ppl-ru",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4m-gptq-retry.qpack -f research/baseline-20261102-001640/eval-ru.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-gptq-pilot_ppl-ru.log",
+    "returncode": 0,
+    "seconds": 0.9670914129819721
+  },
+  {
+    "label": "q4m-gptq-pilot_ppl-en",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4m-gptq-retry.qpack -f research/baseline-20261102-001640/eval-en.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-gptq-pilot_ppl-en.log",
+    "returncode": 0,
+    "seconds": 1.1176829519681633
+  },
+  {
+    "label": "q4m-gptq-bench",
+    "command": "./build/qpack-bench -m research/matrix-20261102-003657/artifacts/q4m-gptq-retry.qpack -p 64 -n 128 -t 1,8,16 -r 3",
+    "log": "research/matrix-20261102-003657/logs/q4m-gptq-bench.log",
+    "returncode": 0,
+    "seconds": 3.3741380139254034
+  },
+  {
+    "label": "q4m-gptq-head4-quantize",
+    "command": "./build/qpack-quantize model.qpack research/matrix-20261102-003657/artifacts/q4m-gptq-head4-retry.qpack -t 8 --type q4m --calib research/matrix-20261102-003657/data/calib.txt --calib-tokens 8192 --gptq --q4-head",
+    "log": "research/matrix-20261102-003657/logs/q4m-gptq-head4-quantize.log",
+    "returncode": 0,
+    "seconds": 49.571051449049264
+  },
+  {
+    "label": "q4m-gptq-head4-selftest",
+    "command": "./build/qpack-cli -m research/matrix-20261102-003657/artifacts/q4m-gptq-head4-retry.qpack --selftest -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-gptq-head4-selftest.log",
+    "returncode": 0,
+    "seconds": 0.16501984908245504
+  },
+  {
+    "label": "q4m-gptq-head4-ppl-ru",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4m-gptq-head4-retry.qpack -f research/matrix-20261102-003657/data/eval-ru.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-gptq-head4-ppl-ru.log",
+    "returncode": 0,
+    "seconds": 3.6245577610097826
+  },
+  {
+    "label": "q4m-gptq-head4-ppl-en",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4m-gptq-head4-retry.qpack -f research/matrix-20261102-003657/data/eval-en.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-gptq-head4-ppl-en.log",
+    "returncode": 0,
+    "seconds": 3.825184001820162
+  },
+  {
+    "label": "q4m-gptq-head4-pilot_ppl-ru",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4m-gptq-head4-retry.qpack -f research/baseline-20261102-001640/eval-ru.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-gptq-head4-pilot_ppl-ru.log",
+    "returncode": 0,
+    "seconds": 0.9170869290828705
+  },
+  {
+    "label": "q4m-gptq-head4-pilot_ppl-en",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4m-gptq-head4-retry.qpack -f research/baseline-20261102-001640/eval-en.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-gptq-head4-pilot_ppl-en.log",
+    "returncode": 0,
+    "seconds": 1.1176629399415106
+  },
+  {
+    "label": "q4m-gptq-head4-bench",
+    "command": "./build/qpack-bench -m research/matrix-20261102-003657/artifacts/q4m-gptq-head4-retry.qpack -p 64 -n 128 -t 1,8,16 -r 3",
+    "log": "research/matrix-20261102-003657/logs/q4m-gptq-head4-bench.log",
+    "returncode": 0,
+    "seconds": 3.4239782840013504
+  },
+  {
+    "label": "q4m-gptq-act-quantize",
+    "command": "./build/qpack-quantize model.qpack research/matrix-20261102-003657/artifacts/q4m-gptq-act-retry.qpack -t 8 --type q4m --calib research/matrix-20261102-003657/data/calib.txt --calib-tokens 8192 --gptq --act-order",
+    "log": "research/matrix-20261102-003657/logs/q4m-gptq-act-quantize.log",
+    "returncode": 0,
+    "seconds": 49.21769819385372
+  },
+  {
+    "label": "q4m-gptq-act-selftest",
+    "command": "./build/qpack-cli -m research/matrix-20261102-003657/artifacts/q4m-gptq-act-retry.qpack --selftest -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-gptq-act-selftest.log",
+    "returncode": 0,
+    "seconds": 0.114825997967273
+  },
+  {
+    "label": "q4m-gptq-act-ppl-ru",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4m-gptq-act-retry.qpack -f research/matrix-20261102-003657/data/eval-ru.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-gptq-act-ppl-ru.log",
+    "returncode": 0,
+    "seconds": 3.4742940890137106
+  },
+  {
+    "label": "q4m-gptq-act-ppl-en",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4m-gptq-act-retry.qpack -f research/matrix-20261102-003657/data/eval-en.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-gptq-act-ppl-en.log",
+    "returncode": 0,
+    "seconds": 3.825469840085134
+  },
+  {
+    "label": "q4m-gptq-act-pilot_ppl-ru",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4m-gptq-act-retry.qpack -f research/baseline-20261102-001640/eval-ru.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-gptq-act-pilot_ppl-ru.log",
+    "returncode": 0,
+    "seconds": 0.9671659260056913
+  },
+  {
+    "label": "q4m-gptq-act-pilot_ppl-en",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4m-gptq-act-retry.qpack -f research/baseline-20261102-001640/eval-en.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-gptq-act-pilot_ppl-en.log",
+    "returncode": 0,
+    "seconds": 1.1175439120270312
+  },
+  {
+    "label": "q4m-gptq-act-bench",
+    "command": "./build/qpack-bench -m research/matrix-20261102-003657/artifacts/q4m-gptq-act-retry.qpack -p 64 -n 128 -t 1,8,16 -r 3",
+    "log": "research/matrix-20261102-003657/logs/q4m-gptq-act-bench.log",
+    "returncode": 0,
+    "seconds": 3.4237947908695787
+  },
+  {
+    "label": "q4m-gptq-act-head4-quantize",
+    "command": "./build/qpack-quantize model.qpack research/matrix-20261102-003657/artifacts/q4m-gptq-act-head4-retry.qpack -t 8 --type q4m --calib research/matrix-20261102-003657/data/calib.txt --calib-tokens 8192 --gptq --act-order --q4-head",
+    "log": "research/matrix-20261102-003657/logs/q4m-gptq-act-head4-quantize.log",
+    "returncode": 0,
+    "seconds": 49.36548012215644
+  },
+  {
+    "label": "q4m-gptq-act-head4-selftest",
+    "command": "./build/qpack-cli -m research/matrix-20261102-003657/artifacts/q4m-gptq-act-head4-retry.qpack --selftest -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-gptq-act-head4-selftest.log",
+    "returncode": 0,
+    "seconds": 0.16509662615135312
+  },
+  {
+    "label": "q4m-gptq-act-head4-ppl-ru",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4m-gptq-act-head4-retry.qpack -f research/matrix-20261102-003657/data/eval-ru.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-gptq-act-head4-ppl-ru.log",
+    "returncode": 0,
+    "seconds": 3.5244944249279797
+  },
+  {
+    "label": "q4m-gptq-act-head4-ppl-en",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4m-gptq-act-head4-retry.qpack -f research/matrix-20261102-003657/data/eval-en.txt -c 256 --chunks 8 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-gptq-act-head4-ppl-en.log",
+    "returncode": 0,
+    "seconds": 3.8753082379698753
+  },
+  {
+    "label": "q4m-gptq-act-head4-pilot_ppl-ru",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4m-gptq-act-head4-retry.qpack -f research/baseline-20261102-001640/eval-ru.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-gptq-act-head4-pilot_ppl-ru.log",
+    "returncode": 0,
+    "seconds": 0.9669692791067064
+  },
+  {
+    "label": "q4m-gptq-act-head4-pilot_ppl-en",
+    "command": "./build/qpack-perplexity -m research/matrix-20261102-003657/artifacts/q4m-gptq-act-head4-retry.qpack -f research/baseline-20261102-001640/eval-en.txt -c 256 --chunks 2 -t 8",
+    "log": "research/matrix-20261102-003657/logs/q4m-gptq-act-head4-pilot_ppl-en.log",
+    "returncode": 0,
+    "seconds": 1.117516536032781
+  },
+  {
+    "label": "q4m-gptq-act-head4-bench",
+    "command": "./build/qpack-bench -m research/matrix-20261102-003657/artifacts/q4m-gptq-act-head4-retry.qpack -p 64 -n 128 -t 1,8,16 -r 3",
+    "log": "research/matrix-20261102-003657/logs/q4m-gptq-act-head4-bench.log",
+    "returncode": 0,
+    "seconds": 3.5243937419727445
+  }
+]

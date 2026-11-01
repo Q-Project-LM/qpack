@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "/workspace/qpack/research/resume_matrix.py", line 53, in <module>
+    if not match or match[1]!='5/5': raise RuntimeError('Selftest did not pass 5/5: '+output)
+                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: Selftest did not pass 5/5: research/matrix-20261102-003657/artifacts/q4-calib-head4.qpack: nq4, vocab 8256, ctx 4096, loaded in 0.01 s, self-test 5/5 (max |dlogit| 5.24e-04), threads 8
+

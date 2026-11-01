@@ -1,0 +1,2 @@
+calibration: 8176 tokens, 92 matrices observed, 81 Hessians
+model.qpack -> research/matrix-20261102-003657/artifacts/q4m-gptq-act-retry.qpack: 89.4 MiB -> 30.1 MiB, q4 36.4M / q8 10.0M / other 0.1M params, 49.1 s

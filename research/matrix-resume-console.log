@@ -1,0 +1,296 @@
+RUN f16-selftest
+f16-selftest exit 0 seconds 0.2
+RUN f16-ppl-ru
+f16-ppl-ru exit 0 seconds 4.8
+RUN f16-ppl-en
+f16-ppl-en exit 0 seconds 5.3
+RUN f16-pilot_ppl-ru
+f16-pilot_ppl-ru exit 0 seconds 1.4
+RUN f16-pilot_ppl-en
+f16-pilot_ppl-en exit 0 seconds 1.4
+RUN f16-bench
+f16-bench exit 0 seconds 5.8
+VARIANT f16 ok
+REUSE q8
+RUN q8-selftest
+q8-selftest exit 0 seconds 0.2
+RUN q8-ppl-ru
+q8-ppl-ru exit 0 seconds 4.4
+RUN q8-ppl-en
+q8-ppl-en exit 0 seconds 4.8
+RUN q8-pilot_ppl-ru
+q8-pilot_ppl-ru exit 0 seconds 1.1
+RUN q8-pilot_ppl-en
+q8-pilot_ppl-en exit 0 seconds 1.3
+RUN q8-bench
+q8-bench exit 0 seconds 6.0
+VARIANT q8 ok
+REUSE q4-plain
+RUN q4-plain-selftest
+q4-plain-selftest exit 0 seconds 0.1
+RUN q4-plain-ppl-ru
+q4-plain-ppl-ru exit 0 seconds 3.5
+RUN q4-plain-ppl-en
+q4-plain-ppl-en exit 0 seconds 3.8
+RUN q4-plain-pilot_ppl-ru
+q4-plain-pilot_ppl-ru exit 0 seconds 1.0
+RUN q4-plain-pilot_ppl-en
+q4-plain-pilot_ppl-en exit 0 seconds 1.0
+RUN q4-plain-bench
+q4-plain-bench exit 0 seconds 3.1
+VARIANT q4-plain ok
+REUSE q4-plain-head4
+RUN q4-plain-head4-selftest
+q4-plain-head4-selftest exit 0 seconds 0.2
+RUN q4-plain-head4-ppl-ru
+q4-plain-head4-ppl-ru exit 0 seconds 3.9
+RUN q4-plain-head4-ppl-en
+q4-plain-head4-ppl-en exit 0 seconds 3.8
+RUN q4-plain-head4-pilot_ppl-ru
+q4-plain-head4-pilot_ppl-ru exit 0 seconds 0.9
+RUN q4-plain-head4-pilot_ppl-en
+q4-plain-head4-pilot_ppl-en exit 0 seconds 1.0
+RUN q4-plain-head4-bench
+q4-plain-head4-bench exit 0 seconds 3.3
+VARIANT q4-plain-head4 ok
+REUSE q4-calib
+RUN q4-calib-selftest
+q4-calib-selftest exit 0 seconds 0.1
+RUN q4-calib-ppl-ru
+q4-calib-ppl-ru exit 0 seconds 3.6
+RUN q4-calib-ppl-en
+q4-calib-ppl-en exit 0 seconds 3.8
+RUN q4-calib-pilot_ppl-ru
+q4-calib-pilot_ppl-ru exit 0 seconds 0.9
+RUN q4-calib-pilot_ppl-en
+q4-calib-pilot_ppl-en exit 0 seconds 1.1
+RUN q4-calib-bench
+q4-calib-bench exit 0 seconds 3.4
+VARIANT q4-calib ok
+REUSE q4-calib-head4
+RUN q4-calib-head4-selftest
+q4-calib-head4-selftest exit 0 seconds 0.1
+RUN q4-calib-head4-ppl-ru
+q4-calib-head4-ppl-ru exit 0 seconds 3.5
+RUN q4-calib-head4-ppl-en
+q4-calib-head4-ppl-en exit 0 seconds 3.9
+RUN q4-calib-head4-pilot_ppl-ru
+q4-calib-head4-pilot_ppl-ru exit 0 seconds 1.0
+RUN q4-calib-head4-pilot_ppl-en
+q4-calib-head4-pilot_ppl-en exit 0 seconds 1.1
+RUN q4-calib-head4-bench
+q4-calib-head4-bench exit 0 seconds 3.4
+VARIANT q4-calib-head4 ok
+RUN q4-gptq-quantize
+q4-gptq-quantize exit 0 seconds 49.6
+RUN q4-gptq-selftest
+q4-gptq-selftest exit 0 seconds 0.1
+RUN q4-gptq-ppl-ru
+q4-gptq-ppl-ru exit 0 seconds 3.6
+RUN q4-gptq-ppl-en
+q4-gptq-ppl-en exit 0 seconds 3.8
+RUN q4-gptq-pilot_ppl-ru
+q4-gptq-pilot_ppl-ru exit 0 seconds 0.9
+RUN q4-gptq-pilot_ppl-en
+q4-gptq-pilot_ppl-en exit 0 seconds 1.1
+RUN q4-gptq-bench
+q4-gptq-bench exit 0 seconds 3.5
+VARIANT q4-gptq ok
+RUN q4-gptq-head4-quantize
+q4-gptq-head4-quantize exit 0 seconds 50.0
+RUN q4-gptq-head4-selftest
+q4-gptq-head4-selftest exit 0 seconds 0.1
+RUN q4-gptq-head4-ppl-ru
+q4-gptq-head4-ppl-ru exit 0 seconds 3.5
+RUN q4-gptq-head4-ppl-en
+q4-gptq-head4-ppl-en exit 0 seconds 3.8
+RUN q4-gptq-head4-pilot_ppl-ru
+q4-gptq-head4-pilot_ppl-ru exit 0 seconds 1.0
+RUN q4-gptq-head4-pilot_ppl-en
+q4-gptq-head4-pilot_ppl-en exit 0 seconds 1.1
+RUN q4-gptq-head4-bench
+q4-gptq-head4-bench exit 0 seconds 3.3
+VARIANT q4-gptq-head4 ok
+RUN q4-gptq-act-quantize
+q4-gptq-act-quantize exit 0 seconds 50.1
+RUN q4-gptq-act-selftest
+q4-gptq-act-selftest exit 0 seconds 0.1
+RUN q4-gptq-act-ppl-ru
+q4-gptq-act-ppl-ru exit 0 seconds 3.7
+RUN q4-gptq-act-ppl-en
+q4-gptq-act-ppl-en exit 0 seconds 3.9
+RUN q4-gptq-act-pilot_ppl-ru
+q4-gptq-act-pilot_ppl-ru exit 0 seconds 0.9
+RUN q4-gptq-act-pilot_ppl-en
+q4-gptq-act-pilot_ppl-en exit 0 seconds 1.1
+RUN q4-gptq-act-bench
+q4-gptq-act-bench exit 0 seconds 3.4
+VARIANT q4-gptq-act ok
+RUN q4-gptq-act-head4-quantize
+q4-gptq-act-head4-quantize exit 0 seconds 50.0
+RUN q4-gptq-act-head4-selftest
+q4-gptq-act-head4-selftest exit 0 seconds 0.1
+RUN q4-gptq-act-head4-ppl-ru
+q4-gptq-act-head4-ppl-ru exit 0 seconds 3.5
+RUN q4-gptq-act-head4-ppl-en
+q4-gptq-act-head4-ppl-en exit 0 seconds 3.9
+RUN q4-gptq-act-head4-pilot_ppl-ru
+q4-gptq-act-head4-pilot_ppl-ru exit 0 seconds 1.0
+RUN q4-gptq-act-head4-pilot_ppl-en
+q4-gptq-act-head4-pilot_ppl-en exit 0 seconds 1.1
+RUN q4-gptq-act-head4-bench
+q4-gptq-act-head4-bench exit 0 seconds 3.4
+VARIANT q4-gptq-act-head4 ok
+RUN q4m-plain-quantize
+q4m-plain-quantize exit 0 seconds 1.9
+RUN q4m-plain-selftest
+q4m-plain-selftest exit 0 seconds 0.1
+RUN q4m-plain-ppl-ru
+q4m-plain-ppl-ru exit 0 seconds 3.6
+RUN q4m-plain-ppl-en
+q4m-plain-ppl-en exit 0 seconds 3.9
+RUN q4m-plain-pilot_ppl-ru
+q4m-plain-pilot_ppl-ru exit 0 seconds 1.0
+RUN q4m-plain-pilot_ppl-en
+q4m-plain-pilot_ppl-en exit 0 seconds 1.0
+RUN q4m-plain-bench
+q4m-plain-bench exit 0 seconds 3.3
+VARIANT q4m-plain ok
+RUN q4m-plain-head4-quantize
+q4m-plain-head4-quantize exit 0 seconds 2.2
+RUN q4m-plain-head4-selftest
+q4m-plain-head4-selftest exit 0 seconds 0.1
+RUN q4m-plain-head4-ppl-ru
+q4m-plain-head4-ppl-ru exit 0 seconds 3.5
+RUN q4m-plain-head4-ppl-en
+q4m-plain-head4-ppl-en exit 0 seconds 3.8
+RUN q4m-plain-head4-pilot_ppl-ru
+q4m-plain-head4-pilot_ppl-ru exit 0 seconds 0.9
+RUN q4m-plain-head4-pilot_ppl-en
+q4m-plain-head4-pilot_ppl-en exit 0 seconds 1.0
+RUN q4m-plain-head4-bench
+q4m-plain-head4-bench exit 0 seconds 3.6
+VARIANT q4m-plain-head4 ok
+RUN q4m-calib-quantize
+q4m-calib-quantize exit 0 seconds 7.5
+RUN q4m-calib-selftest
+q4m-calib-selftest exit 0 seconds 0.1
+RUN q4m-calib-ppl-ru
+q4m-calib-ppl-ru exit 0 seconds 3.5
+RUN q4m-calib-ppl-en
+q4m-calib-ppl-en exit 0 seconds 3.9
+RUN q4m-calib-pilot_ppl-ru
+q4m-calib-pilot_ppl-ru exit 0 seconds 1.0
+RUN q4m-calib-pilot_ppl-en
+q4m-calib-pilot_ppl-en exit 0 seconds 1.1
+RUN q4m-calib-bench
+q4m-calib-bench exit 0 seconds 3.5
+VARIANT q4m-calib ok
+RUN q4m-calib-head4-quantize
+q4m-calib-head4-quantize exit 0 seconds 7.9
+RUN q4m-calib-head4-selftest
+q4m-calib-head4-selftest exit 0 seconds 0.1
+RUN q4m-calib-head4-ppl-ru
+q4m-calib-head4-ppl-ru exit 0 seconds 3.6
+RUN q4m-calib-head4-ppl-en
+q4m-calib-head4-ppl-en exit 0 seconds 3.9
+RUN q4m-calib-head4-pilot_ppl-ru
+q4m-calib-head4-pilot_ppl-ru exit 0 seconds 1.0
+RUN q4m-calib-head4-pilot_ppl-en
+q4m-calib-head4-pilot_ppl-en exit 0 seconds 1.1
+RUN q4m-calib-head4-bench
+q4m-calib-head4-bench exit 0 seconds 3.5
+VARIANT q4m-calib-head4 ok
+RUN q4m-gptq-quantize
+q4m-gptq-quantize exit 0 seconds 49.2
+RUN q4m-gptq-selftest
+q4m-gptq-selftest exit 0 seconds 0.2
+RUN q4m-gptq-ppl-ru
+q4m-gptq-ppl-ru exit 0 seconds 3.5
+RUN q4m-gptq-ppl-en
+q4m-gptq-ppl-en exit 0 seconds 3.8
+RUN q4m-gptq-pilot_ppl-ru
+q4m-gptq-pilot_ppl-ru exit 0 seconds 1.0
+RUN q4m-gptq-pilot_ppl-en
+q4m-gptq-pilot_ppl-en exit 0 seconds 1.1
+RUN q4m-gptq-bench
+q4m-gptq-bench exit 0 seconds 3.4
+VARIANT q4m-gptq ok
+RUN q4m-gptq-head4-quantize
+q4m-gptq-head4-quantize exit 0 seconds 49.6
+RUN q4m-gptq-head4-selftest
+q4m-gptq-head4-selftest exit 0 seconds 0.2
+RUN q4m-gptq-head4-ppl-ru
+q4m-gptq-head4-ppl-ru exit 0 seconds 3.6
+RUN q4m-gptq-head4-ppl-en
+q4m-gptq-head4-ppl-en exit 0 seconds 3.8
+RUN q4m-gptq-head4-pilot_ppl-ru
+q4m-gptq-head4-pilot_ppl-ru exit 0 seconds 0.9
+RUN q4m-gptq-head4-pilot_ppl-en
+q4m-gptq-head4-pilot_ppl-en exit 0 seconds 1.1
+RUN q4m-gptq-head4-bench
+q4m-gptq-head4-bench exit 0 seconds 3.4
+VARIANT q4m-gptq-head4 ok
+RUN q4m-gptq-act-quantize
+q4m-gptq-act-quantize exit 0 seconds 49.2
+RUN q4m-gptq-act-selftest
+q4m-gptq-act-selftest exit 0 seconds 0.1
+RUN q4m-gptq-act-ppl-ru
+q4m-gptq-act-ppl-ru exit 0 seconds 3.5
+RUN q4m-gptq-act-ppl-en
+q4m-gptq-act-ppl-en exit 0 seconds 3.8
+RUN q4m-gptq-act-pilot_ppl-ru
+q4m-gptq-act-pilot_ppl-ru exit 0 seconds 1.0
+RUN q4m-gptq-act-pilot_ppl-en
+q4m-gptq-act-pilot_ppl-en exit 0 seconds 1.1
+RUN q4m-gptq-act-bench
+q4m-gptq-act-bench exit 0 seconds 3.4
+VARIANT q4m-gptq-act ok
+RUN q4m-gptq-act-head4-quantize
+q4m-gptq-act-head4-quantize exit 0 seconds 49.4
+RUN q4m-gptq-act-head4-selftest
+q4m-gptq-act-head4-selftest exit 0 seconds 0.2
+RUN q4m-gptq-act-head4-ppl-ru
+q4m-gptq-act-head4-ppl-ru exit 0 seconds 3.5
+RUN q4m-gptq-act-head4-ppl-en
+q4m-gptq-act-head4-ppl-en exit 0 seconds 3.9
+RUN q4m-gptq-act-head4-pilot_ppl-ru
+q4m-gptq-act-head4-pilot_ppl-ru exit 0 seconds 1.0
+RUN q4m-gptq-act-head4-pilot_ppl-en
+q4m-gptq-act-head4-pilot_ppl-en exit 0 seconds 1.1
+RUN q4m-gptq-act-head4-bench
+q4m-gptq-act-head4-bench exit 0 seconds 3.5
+VARIANT q4m-gptq-act-head4 ok
+DONE research/matrix-20261102-003657
+# Quantization matrix
+
+Source SHA256: 1e22aafe3679970cdd136cbab1b99d60a3430f762d50a6ca69019391577d4c0c
+
+18 configurations: f16, q8, and q4/q4m x plain/calib/GPTQ/GPTQ-act-order x head q8/q4. Embedding follows tool defaults. No algorithm changes.
+
+Primary PPL: separate Wikipedia articles for calibration/evaluation, context256, up to8 chunks, threads8. Calibration cap8192, balanced RU/EN article order; actual counts in logs. Pilot PPL uses saved baseline prose, 2 chunks. Corpora are preliminary and narrow; not comparable with README scores.
+
+Speed: synthetic tokens, prompt64/decode128, 1/8/16 threads, separate best-of3 per phase. Selftest checks recalculated quantized references, not original quality.
+
+| Variant | MiB | PPL RU | PPL EN | Decode 1 | Decode 8 | Decode 16 | Status |
+|---|---:|---:|---:|---:|---:|---:|---|
+| f16 | 89.39 | 23.4519 | 11.8276 | 135.6 | 404.1 | 395.9 | 5/5 |
+| q8 | 46.54 | 23.4483 | 11.8381 | 154.5 | 502.5 | 532.6 | 5/5 |
+| q4-plain | 29.45 | 23.9525 | 12.2081 | 336.4 | 654.9 | 646.8 | 5/5 |
+| q4-plain-head4 | 25.86 | 24.1651 | 12.3774 | 285.7 | 645.0 | 636.8 | 5/5 |
+| q4-calib | 29.45 | 23.7861 | 12.1435 | 290.5 | 621.1 | 570.2 | 5/5 |
+| q4-calib-head4 | 25.86 | 24.0423 | 12.3193 | 322.4 | 633.6 | 530.6 | 5/5 |
+| q4-gptq | 29.45 | 23.4445 | 11.9639 | 283.0 | 611.0 | 532.9 | 5/5 |
+| q4-gptq-head4 | 25.86 | 23.6976 | 12.1310 | 325.1 | 618.7 | 538.7 | 5/5 |
+| q4-gptq-act | 29.45 | 23.5392 | 11.8974 | 297.2 | 616.8 | 567.9 | 5/5 |
+| q4-gptq-act-head4 | 25.86 | 23.7738 | 12.0667 | 309.7 | 632.4 | 537.1 | 5/5 |
+| q4m-plain | 30.12 | 23.7679 | 12.1341 | 302.3 | 658.6 | 616.3 | 5/5 |
+| q4m-plain-head4 | 26.53 | 23.9790 | 12.3057 | 265.9 | 641.3 | 624.3 | 5/5 |
+| q4m-calib | 30.12 | 23.6534 | 12.0704 | 291.7 | 627.8 | 543.4 | 5/5 |
+| q4m-calib-head4 | 26.53 | 23.9012 | 12.2420 | 272.6 | 644.1 | 623.9 | 5/5 |
+| q4m-gptq | 30.12 | 23.3751 | 11.9168 | 315.8 | 631.3 | 554.2 | 5/5 |
+| q4m-gptq-head4 | 26.53 | 23.6242 | 12.0855 | 276.1 | 647.3 | 614.0 | 5/5 |
+| q4m-gptq-act | 30.12 | 23.5224 | 11.8951 | 304.5 | 624.3 | 550.0 | 5/5 |
+| q4m-gptq-act-head4 | 26.53 | 23.7571 | 12.0652 | 287.7 | 618.6 | 552.0 | 5/5 |
+
+See results.json for pilot PPL, all prompt speeds, token counts, sizes and model hashes; commands.json and logs/ preserve all commands and errors. sources.json records article URLs, revisions and attribution.

@@ -1,0 +1,122 @@
+[
+  {
+    "language": "ru",
+    "title": "Физика",
+    "url": "https://ru.wikipedia.org/wiki/%D0%A4%D0%B8%D0%B7%D0%B8%D0%BA%D0%B0",
+    "revision": null,
+    "file": "data/ru-384.txt",
+    "sha256": "9a29f3840f70d4a85768f70e52b9d579d414cf4a0b2d56267065c5ec4a0b5463",
+    "note": "Cached snapshot from initial API download; revision metadata unavailable.",
+    "license": "Wikipedia text: CC BY-SA; see source article history"
+  },
+  {
+    "language": "ru",
+    "title": "Биология",
+    "url": "https://ru.wikipedia.org/wiki/%D0%91%D0%B8%D0%BE%D0%BB%D0%BE%D0%B3%D0%B8%D1%8F",
+    "revision": null,
+    "file": "data/ru-68.txt",
+    "sha256": "4199245ebdac44670b5d59249e054e2ca0b3e5d9ddb39e0e5bfead78d1214d5c",
+    "note": "Cached snapshot from initial API download; revision metadata unavailable.",
+    "license": "Wikipedia text: CC BY-SA; see source article history"
+  },
+  {
+    "language": "ru",
+    "title": "География",
+    "url": "https://ru.wikipedia.org/wiki/%D0%93%D0%B5%D0%BE%D0%B3%D1%80%D0%B0%D1%84%D0%B8%D1%8F",
+    "revision": null,
+    "file": "data/ru-812.txt",
+    "sha256": "267d81df80d18c76eabcdc5277ecc816ac6e5bf1b08550dbed75a9f2f3f970c3",
+    "note": "Cached snapshot from initial API download; revision metadata unavailable.",
+    "license": "Wikipedia text: CC BY-SA; see source article history"
+  },
+  {
+    "language": "ru",
+    "title": "Компьютер",
+    "url": "https://ru.wikipedia.org/wiki/%D0%9A%D0%BE%D0%BC%D0%BF%D1%8C%D1%8E%D1%82%D0%B5%D1%80",
+    "revision": null,
+    "file": "data/ru-910.txt",
+    "sha256": "9896eee4b237be8ba0e31ffb6de81c6be4b6fa359ba95a003348ea30a7df65c6",
+    "note": "Cached snapshot from initial API download; revision metadata unavailable.",
+    "license": "Wikipedia text: CC BY-SA; see source article history"
+  },
+  {
+    "language": "ru",
+    "title": "История",
+    "url": "https://ru.wikipedia.org/wiki/%D0%98%D1%81%D1%82%D0%BE%D1%80%D0%B8%D1%8F",
+    "revision": null,
+    "file": "data/ru-6182161.txt",
+    "sha256": "5156f82d5703a68f3d0a248143592238c43445dc99a5bf1f7332f450efe0dc5a",
+    "note": "Cached snapshot from initial API download; revision metadata unavailable.",
+    "license": "Wikipedia text: CC BY-SA; see source article history"
+  },
+  {
+    "language": "ru",
+    "title": "Астрономия",
+    "url": "https://ru.wikipedia.org/wiki/%D0%90%D1%81%D1%82%D1%80%D0%BE%D0%BD%D0%BE%D0%BC%D0%B8%D1%8F",
+    "revision": null,
+    "file": "data/ru-588.txt",
+    "sha256": "b4312e27556a3df1b73744f532c68352489004938efc258b51673934feddbb0e",
+    "note": "Cached snapshot from initial API download; revision metadata unavailable.",
+    "license": "Wikipedia text: CC BY-SA; see source article history"
+  },
+  {
+    "language": "en",
+    "title": "Physics",
+    "url": "https://en.wikipedia.org/wiki/Physics",
+    "revision": null,
+    "file": "data/en-22939.txt",
+    "sha256": "d4ae4ff28b8b52b8290e8fdf505939d28bb517f05cf0a4edfa146408ff83a251",
+    "note": "Cached snapshot from initial API download; revision metadata unavailable.",
+    "license": "Wikipedia text: CC BY-SA; see source article history"
+  },
+  {
+    "language": "en",
+    "title": "Biology",
+    "url": "https://en.wikipedia.org/wiki/Biology",
+    "revision": null,
+    "file": "data/en-9127632.txt",
+    "sha256": "a1ab4560cb8859f5c35c10f474b94e4c0a50daad4fb751fa160444e9d91a6989",
+    "note": "Cached snapshot from initial API download; revision metadata unavailable.",
+    "license": "Wikipedia text: CC BY-SA; see source article history"
+  },
+  {
+    "language": "en",
+    "title": "Geography",
+    "url": "https://en.wikipedia.org/wiki/Geography",
+    "revision": null,
+    "file": "data/en-18963910.txt",
+    "sha256": "0caa42f0038182430bac06c15fa11c75a83876f07576e700279e79e241090749",
+    "note": "Cached snapshot from initial API download; revision metadata unavailable.",
+    "license": "Wikipedia text: CC BY-SA; see source article history"
+  },
+  {
+    "language": "en",
+    "title": "Computer",
+    "url": "https://en.wikipedia.org/wiki/Computer",
+    "revision": null,
+    "file": "data/en-7878457.txt",
+    "sha256": "ca8d5ca5cf260a825082ae7fa89c07523e892c3abde4d6348c5096b56f9229d8",
+    "note": "Cached snapshot from initial API download; revision metadata unavailable.",
+    "license": "Wikipedia text: CC BY-SA; see source article history"
+  },
+  {
+    "language": "en",
+    "title": "History",
+    "url": "https://en.wikipedia.org/wiki/History",
+    "revision": 1382189844,
+    "api_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts%7Cinfo%7Crevisions&explaintext=1&format=json&titles=History&rvprop=ids&inprop=url&redirects=1",
+    "file": "data/en-10772350.txt",
+    "sha256": "f12ee125d8483e4a8e966171a98c5614204a19d1342950408411870818026c8e",
+    "license": "Wikipedia text: CC BY-SA; see article history"
+  },
+  {
+    "language": "en",
+    "title": "Astronomy",
+    "url": "https://en.wikipedia.org/wiki/Astronomy",
+    "revision": 1377879713,
+    "api_url": "https://en.wikipedia.org/w/api.php?action=query&prop=extracts%7Cinfo%7Crevisions&explaintext=1&format=json&titles=Astronomy&rvprop=ids&inprop=url&redirects=1",
+    "file": "data/en-50650.txt",
+    "sha256": "ba2952b73251d15662163567dd061b3a54ffb5c99a233804a5144760f4efeb54",
+    "license": "Wikipedia text: CC BY-SA; see article history"
+  }
+]

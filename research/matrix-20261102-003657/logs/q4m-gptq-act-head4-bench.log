@@ -1,0 +1,5 @@
+| model | MiB | arch | threads | pp64 tok/s | tg128 tok/s |
+|---|---|---|---|---|---|
+| q4m-gptq-act-head4-retry.qpack | 26.5 | nq4 | 1 | 354.3 | 287.7 |
+| q4m-gptq-act-head4-retry.qpack | 26.5 | nq4 | 8 | 1500.2 | 618.6 |
+| q4m-gptq-act-head4-retry.qpack | 26.5 | nq4 | 16 | 2125.5 | 552.0 |

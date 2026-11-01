@@ -1,0 +1,87 @@
+[
+  {
+    "name": "f16",
+    "flags": null,
+    "status": "failed",
+    "bytes": 93736125,
+    "sha256": "1e22aafe3679970cdd136cbab1b99d60a3430f762d50a6ca69019391577d4c0c",
+    "path": "model.qpack",
+    "selftest": "model.qpack: nq4, vocab 8256, ctx 4096, loaded in 0.01 s, self-test 5/5 (max |dlogit| 6.02e-03), threads 8",
+    "error": "Selftest did not pass 5/5: model.qpack: nq4, vocab 8256, ctx 4096, loaded in 0.01 s, self-test 5/5 (max |dlogit| 6.02e-03), threads 8\n"
+  },
+  {
+    "name": "q8",
+    "flags": [
+      "--type",
+      "q8"
+    ],
+    "status": "failed",
+    "bytes": 48798784,
+    "sha256": "73a5e7defc4976a76f1aa9d17c28c1741e7957da31a2be836e70deaf150c07a5",
+    "path": "research/matrix-20261102-003657/artifacts/q8.qpack",
+    "selftest": "research/matrix-20261102-003657/artifacts/q8.qpack: nq4, vocab 8256, ctx 4096, loaded in 0.01 s, self-test 5/5 (max |dlogit| 6.29e-04), threads 8",
+    "error": "Selftest did not pass 5/5: research/matrix-20261102-003657/artifacts/q8.qpack: nq4, vocab 8256, ctx 4096, loaded in 0.01 s, self-test 5/5 (max |dlogit| 6.29e-04), threads 8\n"
+  },
+  {
+    "name": "q4-plain",
+    "flags": [
+      "--type",
+      "q4"
+    ],
+    "status": "failed",
+    "bytes": 30884992,
+    "sha256": "0cde501ad009803ab9478eb6dfab4f71010c13ffb487c76bc757e8b41a12edbf",
+    "path": "research/matrix-20261102-003657/artifacts/q4-plain.qpack",
+    "selftest": "research/matrix-20261102-003657/artifacts/q4-plain.qpack: nq4, vocab 8256, ctx 4096, loaded in 0.01 s, self-test 5/5 (max |dlogit| 5.86e-04), threads 8",
+    "error": "Selftest did not pass 5/5: research/matrix-20261102-003657/artifacts/q4-plain.qpack: nq4, vocab 8256, ctx 4096, loaded in 0.01 s, self-test 5/5 (max |dlogit| 5.86e-04), threads 8\n"
+  },
+  {
+    "name": "q4-plain-head4",
+    "flags": [
+      "--type",
+      "q4",
+      "--q4-head"
+    ],
+    "status": "failed",
+    "bytes": 27120320,
+    "sha256": "670c667a2c0be9781da189886e1d1fcc8d2b2d919b4154a14ec9419bd291378f",
+    "path": "research/matrix-20261102-003657/artifacts/q4-plain-head4.qpack",
+    "selftest": "research/matrix-20261102-003657/artifacts/q4-plain-head4.qpack: nq4, vocab 8256, ctx 4096, loaded in 0.01 s, self-test 5/5 (max |dlogit| 1.07e-03), threads 8",
+    "error": "Selftest did not pass 5/5: research/matrix-20261102-003657/artifacts/q4-plain-head4.qpack: nq4, vocab 8256, ctx 4096, loaded in 0.01 s, self-test 5/5 (max |dlogit| 1.07e-03), threads 8\n"
+  },
+  {
+    "name": "q4-calib",
+    "flags": [
+      "--type",
+      "q4",
+      "--calib",
+      "research/matrix-20261102-003657/data/calib.txt",
+      "--calib-tokens",
+      "8192"
+    ],
+    "status": "failed",
+    "bytes": 30885056,
+    "sha256": "6c31755efcfdf4aa5c8ef8e8c2d3bb304e9178f4efc166c5dac094715ceae3b4",
+    "path": "research/matrix-20261102-003657/artifacts/q4-calib.qpack",
+    "selftest": "research/matrix-20261102-003657/artifacts/q4-calib.qpack: nq4, vocab 8256, ctx 4096, loaded in 0.01 s, self-test 5/5 (max |dlogit| 9.11e-04), threads 8",
+    "error": "Selftest did not pass 5/5: research/matrix-20261102-003657/artifacts/q4-calib.qpack: nq4, vocab 8256, ctx 4096, loaded in 0.01 s, self-test 5/5 (max |dlogit| 9.11e-04), threads 8\n"
+  },
+  {
+    "name": "q4-calib-head4",
+    "flags": [
+      "--type",
+      "q4",
+      "--calib",
+      "research/matrix-20261102-003657/data/calib.txt",
+      "--calib-tokens",
+      "8192",
+      "--q4-head"
+    ],
+    "status": "failed",
+    "bytes": 27120320,
+    "sha256": "b2228e610f560796c0ef2820aab97d86a7f0f744ad778917847521eb2d4e523b",
+    "path": "research/matrix-20261102-003657/artifacts/q4-calib-head4.qpack",
+    "selftest": "research/matrix-20261102-003657/artifacts/q4-calib-head4.qpack: nq4, vocab 8256, ctx 4096, loaded in 0.01 s, self-test 5/5 (max |dlogit| 5.24e-04), threads 8",
+    "error": "Selftest did not pass 5/5: research/matrix-20261102-003657/artifacts/q4-calib-head4.qpack: nq4, vocab 8256, ctx 4096, loaded in 0.01 s, self-test 5/5 (max |dlogit| 5.24e-04), threads 8\n"
+  }
+]

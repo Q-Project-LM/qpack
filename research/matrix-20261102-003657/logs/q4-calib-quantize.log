@@ -1,0 +1,2 @@
+calibration: 8176 tokens, 92 matrices observed, 0 Hessians
+model.qpack -> research/matrix-20261102-003657/artifacts/q4-calib.qpack: 89.4 MiB -> 29.5 MiB, q4 37.9M / q8 8.5M / other 0.1M params, 7.5 s

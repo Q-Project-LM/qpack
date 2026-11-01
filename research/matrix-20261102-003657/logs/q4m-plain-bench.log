@@ -1,0 +1,5 @@
+| model | MiB | arch | threads | pp64 tok/s | tg128 tok/s |
+|---|---|---|---|---|---|
+| q4m-plain-retry.qpack | 30.1 | nq4 | 1 | 380.6 | 302.3 |
+| q4m-plain-retry.qpack | 30.1 | nq4 | 8 | 1547.7 | 658.6 |
+| q4m-plain-retry.qpack | 30.1 | nq4 | 16 | 2098.7 | 616.3 |

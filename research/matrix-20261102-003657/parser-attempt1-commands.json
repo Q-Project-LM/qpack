@@ -1,0 +1,68 @@
+[
+  {
+    "label": "f16-selftest",
+    "command": "./build/qpack-cli -m model.qpack --selftest -t 8",
+    "returncode": 0,
+    "seconds": 0.1650108431931585
+  },
+  {
+    "label": "q8-quantize",
+    "command": "./build/qpack-quantize model.qpack research/matrix-20261102-003657/artifacts/q8.qpack -t 8 --type q8",
+    "returncode": 0,
+    "seconds": 0.6161810019984841
+  },
+  {
+    "label": "q8-selftest",
+    "command": "./build/qpack-cli -m research/matrix-20261102-003657/artifacts/q8.qpack --selftest -t 8",
+    "returncode": 0,
+    "seconds": 0.16489911498501897
+  },
+  {
+    "label": "q4-plain-quantize",
+    "command": "./build/qpack-quantize model.qpack research/matrix-20261102-003657/artifacts/q4-plain.qpack -t 8 --type q4",
+    "returncode": 0,
+    "seconds": 2.019034804077819
+  },
+  {
+    "label": "q4-plain-selftest",
+    "command": "./build/qpack-cli -m research/matrix-20261102-003657/artifacts/q4-plain.qpack --selftest -t 8",
+    "returncode": 0,
+    "seconds": 0.11477928492240608
+  },
+  {
+    "label": "q4-plain-head4-quantize",
+    "command": "./build/qpack-quantize model.qpack research/matrix-20261102-003657/artifacts/q4-plain-head4.qpack -t 8 --type q4 --q4-head",
+    "returncode": 0,
+    "seconds": 2.3201531369704753
+  },
+  {
+    "label": "q4-plain-head4-selftest",
+    "command": "./build/qpack-cli -m research/matrix-20261102-003657/artifacts/q4-plain-head4.qpack --selftest -t 8",
+    "returncode": 0,
+    "seconds": 0.16478600120171905
+  },
+  {
+    "label": "q4-calib-quantize",
+    "command": "./build/qpack-quantize model.qpack research/matrix-20261102-003657/artifacts/q4-calib.qpack -t 8 --type q4 --calib research/matrix-20261102-003657/data/calib.txt --calib-tokens 8192",
+    "returncode": 0,
+    "seconds": 7.535797703079879
+  },
+  {
+    "label": "q4-calib-selftest",
+    "command": "./build/qpack-cli -m research/matrix-20261102-003657/artifacts/q4-calib.qpack --selftest -t 8",
+    "returncode": 0,
+    "seconds": 0.11467492091469467
+  },
+  {
+    "label": "q4-calib-head4-quantize",
+    "command": "./build/qpack-quantize model.qpack research/matrix-20261102-003657/artifacts/q4-calib-head4.qpack -t 8 --type q4 --calib research/matrix-20261102-003657/data/calib.txt --calib-tokens 8192 --q4-head",
+    "returncode": 0,
+    "seconds": 8.037254363996908
+  },
+  {
+    "label": "q4-calib-head4-selftest",
+    "command": "./build/qpack-cli -m research/matrix-20261102-003657/artifacts/q4-calib-head4.qpack --selftest -t 8",
+    "returncode": 0,
+    "seconds": 0.1145859060343355
+  }
+]

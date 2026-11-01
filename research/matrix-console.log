@@ -1,0 +1,29 @@
+RUN f16-selftest
+f16-selftest exit 0 seconds 0.2
+VARIANT f16 failed
+RUN q8-quantize
+q8-quantize exit 0 seconds 0.6
+RUN q8-selftest
+q8-selftest exit 0 seconds 0.2
+VARIANT q8 failed
+RUN q4-plain-quantize
+q4-plain-quantize exit 0 seconds 2.0
+RUN q4-plain-selftest
+q4-plain-selftest exit 0 seconds 0.1
+VARIANT q4-plain failed
+RUN q4-plain-head4-quantize
+q4-plain-head4-quantize exit 0 seconds 2.3
+RUN q4-plain-head4-selftest
+q4-plain-head4-selftest exit 0 seconds 0.2
+VARIANT q4-plain-head4 failed
+RUN q4-calib-quantize
+q4-calib-quantize exit 0 seconds 7.5
+RUN q4-calib-selftest
+q4-calib-selftest exit 0 seconds 0.1
+VARIANT q4-calib failed
+RUN q4-calib-head4-quantize
+q4-calib-head4-quantize exit 0 seconds 8.0
+RUN q4-calib-head4-selftest
+q4-calib-head4-selftest exit 0 seconds 0.1
+VARIANT q4-calib-head4 failed
+RUN q4-gptq-quantize

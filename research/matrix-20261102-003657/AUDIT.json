@@ -1,0 +1,17 @@
+{
+  "configurations": 18,
+  "selftests_passed": 18,
+  "primary_tokens_per_language": 2040,
+  "pilot_tokens_per_language": 510,
+  "source_unchanged": true,
+  "all_artifact_hashes_verified": true,
+  "threads": [
+    1,
+    8,
+    16
+  ],
+  "script_snapshots_verified": {
+    "initial": true,
+    "resumed": true
+  }
+}
