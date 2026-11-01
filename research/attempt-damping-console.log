@@ -1,0 +1,30 @@
+RUN damp005 build
+EXIT damp005 build 0
+RUN damp005 quantize
+EXIT damp005 quantize 0
+RUN damp005 selftest
+EXIT damp005 selftest 0
+RUN damp005 wiki-ru
+EXIT damp005 wiki-ru 0
+RUN damp005 wiki-en
+EXIT damp005 wiki-en 0
+RUN damp005 pilot-ru
+EXIT damp005 pilot-ru 0
+RUN damp005 pilot-en
+EXIT damp005 pilot-en 0
+DONE damp005
+RUN damp020 build
+EXIT damp020 build 0
+RUN damp020 quantize
+EXIT damp020 quantize 0
+RUN damp020 selftest
+EXIT damp020 selftest 0
+RUN damp020 wiki-ru
+EXIT damp020 wiki-ru 0
+RUN damp020 wiki-en
+EXIT damp020 wiki-en 0
+RUN damp020 pilot-ru
+EXIT damp020 pilot-ru 0
+RUN damp020 pilot-en
+EXIT damp020 pilot-en 0
+DONE damp020

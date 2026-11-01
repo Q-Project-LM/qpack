@@ -1,0 +1,124 @@
+[
+  {
+    "label": "build",
+    "args": [
+      "g++",
+      "-std=c++17",
+      "-O3",
+      "-march=native",
+      "-Iinclude",
+      "research/attempt-damp005/quantize.cpp",
+      "build/libqpack.a",
+      "-pthread",
+      "-o",
+      "research/attempt-damp005/quantize"
+    ],
+    "code": 0,
+    "seconds": 6.609209775924683
+  },
+  {
+    "label": "quantize",
+    "args": [
+      "research/attempt-damp005/quantize",
+      "model.qpack",
+      "research/attempt-damp005/candidate.qpack",
+      "--type",
+      "q4",
+      "--calib",
+      "research/matrix-20261102-003657/data/calib.txt",
+      "--calib-tokens",
+      "8192",
+      "--gptq",
+      "--act-order",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 49.78654861450195
+  },
+  {
+    "label": "selftest",
+    "args": [
+      "build/qpack-cli",
+      "-m",
+      "research/attempt-damp005/candidate.qpack",
+      "--selftest",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 0.11615228652954102
+  },
+  {
+    "label": "wiki-ru",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/attempt-damp005/candidate.qpack",
+      "-f",
+      "research/matrix-20261102-003657/data/eval-ru.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "8",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 3.4813153743743896
+  },
+  {
+    "label": "wiki-en",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/attempt-damp005/candidate.qpack",
+      "-f",
+      "research/matrix-20261102-003657/data/eval-en.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "8",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 3.769230365753174
+  },
+  {
+    "label": "pilot-ru",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/attempt-damp005/candidate.qpack",
+      "-f",
+      "research/baseline-20261102-001640/eval-ru.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "2",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 0.9177753925323486
+  },
+  {
+    "label": "pilot-en",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/attempt-damp005/candidate.qpack",
+      "-f",
+      "research/baseline-20261102-001640/eval-en.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "2",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 1.0588874816894531
+  }
+]
