@@ -1,0 +1,228 @@
+{
+  "new_run": "research/matrix-20261102-013404",
+  "all_18_pass": true,
+  "inputs_match": {
+    "calib.txt": true,
+    "eval-ru.txt": true,
+    "eval-en.txt": true
+  },
+  "same_weight_files": 18,
+  "comparisons": [
+    {
+      "name": "f16",
+      "same_weights": true,
+      "old_ppl": {
+        "ru": 23.4519,
+        "en": 11.8276
+      },
+      "new_ppl": {
+        "ru": 23.4519,
+        "en": 11.8276
+      }
+    },
+    {
+      "name": "q8",
+      "same_weights": true,
+      "old_ppl": {
+        "ru": 23.4483,
+        "en": 11.8381
+      },
+      "new_ppl": {
+        "ru": 23.4483,
+        "en": 11.8381
+      }
+    },
+    {
+      "name": "q4-plain",
+      "same_weights": true,
+      "old_ppl": {
+        "ru": 23.9525,
+        "en": 12.2081
+      },
+      "new_ppl": {
+        "ru": 23.9525,
+        "en": 12.2081
+      }
+    },
+    {
+      "name": "q4-plain-head4",
+      "same_weights": true,
+      "old_ppl": {
+        "ru": 24.1651,
+        "en": 12.3774
+      },
+      "new_ppl": {
+        "ru": 24.1651,
+        "en": 12.3774
+      }
+    },
+    {
+      "name": "q4-calib",
+      "same_weights": true,
+      "old_ppl": {
+        "ru": 23.7861,
+        "en": 12.1435
+      },
+      "new_ppl": {
+        "ru": 23.7861,
+        "en": 12.1435
+      }
+    },
+    {
+      "name": "q4-calib-head4",
+      "same_weights": true,
+      "old_ppl": {
+        "ru": 24.0423,
+        "en": 12.3193
+      },
+      "new_ppl": {
+        "ru": 24.0423,
+        "en": 12.3193
+      }
+    },
+    {
+      "name": "q4-gptq",
+      "same_weights": true,
+      "old_ppl": {
+        "ru": 23.4445,
+        "en": 11.9639
+      },
+      "new_ppl": {
+        "ru": 23.4445,
+        "en": 11.9639
+      }
+    },
+    {
+      "name": "q4-gptq-head4",
+      "same_weights": true,
+      "old_ppl": {
+        "ru": 23.6976,
+        "en": 12.131
+      },
+      "new_ppl": {
+        "ru": 23.6976,
+        "en": 12.131
+      }
+    },
+    {
+      "name": "q4-gptq-act",
+      "same_weights": true,
+      "old_ppl": {
+        "ru": 23.5392,
+        "en": 11.8974
+      },
+      "new_ppl": {
+        "ru": 23.5392,
+        "en": 11.8974
+      }
+    },
+    {
+      "name": "q4-gptq-act-head4",
+      "same_weights": true,
+      "old_ppl": {
+        "ru": 23.7738,
+        "en": 12.0667
+      },
+      "new_ppl": {
+        "ru": 23.7738,
+        "en": 12.0667
+      }
+    },
+    {
+      "name": "q4m-plain",
+      "same_weights": true,
+      "old_ppl": {
+        "ru": 23.7679,
+        "en": 12.1341
+      },
+      "new_ppl": {
+        "ru": 23.7679,
+        "en": 12.1341
+      }
+    },
+    {
+      "name": "q4m-plain-head4",
+      "same_weights": true,
+      "old_ppl": {
+        "ru": 23.979,
+        "en": 12.3057
+      },
+      "new_ppl": {
+        "ru": 23.979,
+        "en": 12.3057
+      }
+    },
+    {
+      "name": "q4m-calib",
+      "same_weights": true,
+      "old_ppl": {
+        "ru": 23.6534,
+        "en": 12.0704
+      },
+      "new_ppl": {
+        "ru": 23.6534,
+        "en": 12.0704
+      }
+    },
+    {
+      "name": "q4m-calib-head4",
+      "same_weights": true,
+      "old_ppl": {
+        "ru": 23.9012,
+        "en": 12.242
+      },
+      "new_ppl": {
+        "ru": 23.9012,
+        "en": 12.242
+      }
+    },
+    {
+      "name": "q4m-gptq",
+      "same_weights": true,
+      "old_ppl": {
+        "ru": 23.3751,
+        "en": 11.9168
+      },
+      "new_ppl": {
+        "ru": 23.3751,
+        "en": 11.9168
+      }
+    },
+    {
+      "name": "q4m-gptq-head4",
+      "same_weights": true,
+      "old_ppl": {
+        "ru": 23.6242,
+        "en": 12.0855
+      },
+      "new_ppl": {
+        "ru": 23.6242,
+        "en": 12.0855
+      }
+    },
+    {
+      "name": "q4m-gptq-act",
+      "same_weights": true,
+      "old_ppl": {
+        "ru": 23.5224,
+        "en": 11.8951
+      },
+      "new_ppl": {
+        "ru": 23.5224,
+        "en": 11.8951
+      }
+    },
+    {
+      "name": "q4m-gptq-act-head4",
+      "same_weights": true,
+      "old_ppl": {
+        "ru": 23.7571,
+        "en": 12.0652
+      },
+      "new_ppl": {
+        "ru": 23.7571,
+        "en": 12.0652
+      }
+    }
+  ]
+}

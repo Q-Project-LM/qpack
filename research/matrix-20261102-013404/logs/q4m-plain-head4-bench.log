@@ -1,0 +1,5 @@
+| model | MiB | arch | threads | pp64 tok/s | tg128 tok/s |
+|---|---|---|---|---|---|
+| q4m-plain-head4.qpack | 26.5 | nq4 | 1 | 390.7 | 290.0 |
+| q4m-plain-head4.qpack | 26.5 | nq4 | 8 | 1579.4 | 627.1 |
+| q4m-plain-head4.qpack | 26.5 | nq4 | 16 | 2128.7 | 629.2 |

@@ -1,0 +1,11 @@
+RUN build
+build 0
+RUN quantize
+quantize 0
+RUN selftest
+selftest 0
+RUN ppl-ru
+ppl-ru 0
+RUN ppl-en
+ppl-en 0
+DONE

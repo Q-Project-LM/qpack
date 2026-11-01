@@ -1,0 +1,88 @@
+[
+  {
+    "name": "build",
+    "args": [
+      "g++",
+      "-std=c++17",
+      "-O3",
+      "-march=native",
+      "-Iinclude",
+      "research/attempt-dense-scales/quantize.cpp",
+      "build/libqpack.a",
+      "-pthread",
+      "-o",
+      "research/attempt-dense-scales/quantize"
+    ],
+    "code": 0,
+    "seconds": 6.95632529258728
+  },
+  {
+    "name": "quantize",
+    "args": [
+      "research/attempt-dense-scales/quantize",
+      "model.qpack",
+      "research/attempt-dense-scales/candidate.qpack",
+      "--type",
+      "q4",
+      "--calib",
+      "research/matrix-20261102-003657/data/calib.txt",
+      "--calib-tokens",
+      "8192",
+      "--gptq",
+      "--act-order",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 52.11072659492493
+  },
+  {
+    "name": "selftest",
+    "args": [
+      "build/qpack-cli",
+      "-m",
+      "research/attempt-dense-scales/candidate.qpack",
+      "--selftest",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 0.11097526550292969
+  },
+  {
+    "name": "ppl-ru",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/attempt-dense-scales/candidate.qpack",
+      "-f",
+      "research/matrix-20261102-003657/data/eval-ru.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "8",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 3.4364988803863525
+  },
+  {
+    "name": "ppl-en",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/attempt-dense-scales/candidate.qpack",
+      "-f",
+      "research/matrix-20261102-003657/data/eval-en.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "8",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 3.828886032104492
+  }
+]

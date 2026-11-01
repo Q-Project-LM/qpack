@@ -1,2 +1,4 @@
 *.qpack
 __pycache__/
+
+attempt-*/quantize

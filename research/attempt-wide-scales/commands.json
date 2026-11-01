@@ -1,0 +1,88 @@
+[
+  {
+    "name": "build",
+    "args": [
+      "g++",
+      "-std=c++17",
+      "-O3",
+      "-march=native",
+      "-Iinclude",
+      "research/attempt-wide-scales/quantize.cpp",
+      "build/libqpack.a",
+      "-pthread",
+      "-o",
+      "research/attempt-wide-scales/quantize"
+    ],
+    "code": 0,
+    "seconds": 6.584985017776489
+  },
+  {
+    "name": "quantize",
+    "args": [
+      "research/attempt-wide-scales/quantize",
+      "model.qpack",
+      "research/attempt-wide-scales/candidate.qpack",
+      "--type",
+      "q4",
+      "--calib",
+      "research/matrix-20261102-003657/data/calib.txt",
+      "--calib-tokens",
+      "8192",
+      "--gptq",
+      "--act-order",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 50.92557978630066
+  },
+  {
+    "name": "selftest",
+    "args": [
+      "build/qpack-cli",
+      "-m",
+      "research/attempt-wide-scales/candidate.qpack",
+      "--selftest",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 0.10852861404418945
+  },
+  {
+    "name": "ppl-ru",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/attempt-wide-scales/candidate.qpack",
+      "-f",
+      "research/matrix-20261102-003657/data/eval-ru.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "8",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 3.4415817260742188
+  },
+  {
+    "name": "ppl-en",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/attempt-wide-scales/candidate.qpack",
+      "-f",
+      "research/matrix-20261102-003657/data/eval-en.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "8",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 3.7532331943511963
+  }
+]

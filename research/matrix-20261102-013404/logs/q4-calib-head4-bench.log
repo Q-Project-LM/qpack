@@ -1,0 +1,5 @@
+| model | MiB | arch | threads | pp64 tok/s | tg128 tok/s |
+|---|---|---|---|---|---|
+| q4-calib-head4.qpack | 25.9 | nq4 | 1 | 416.9 | 333.9 |
+| q4-calib-head4.qpack | 25.9 | nq4 | 8 | 1548.0 | 623.5 |
+| q4-calib-head4.qpack | 25.9 | nq4 | 16 | 2128.2 | 531.4 |
