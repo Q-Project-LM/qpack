@@ -1,0 +1,29 @@
+{
+  "no-act-order": {
+    "bytes": 369546048,
+    "sha256": "78e460d6aec9120d0107bb2f6b3c4159b06bf626272369b0f9db95657be6cddc",
+    "ppl": {
+      "wiki-ru": {
+        "tokens": 1020,
+        "nll": 2.32863,
+        "ppl": 10.2639
+      },
+      "wiki-en": {
+        "tokens": 1020,
+        "nll": 2.74858,
+        "ppl": 15.6204
+      },
+      "extended-ru": {
+        "tokens": 1020,
+        "nll": 3.00158,
+        "ppl": 20.1172
+      },
+      "extended-en": {
+        "tokens": 1020,
+        "nll": 2.71694,
+        "ppl": 15.1339
+      }
+    },
+    "selftest_output": "research/qwen-validation/artifacts/no-act-order.qpack: llama:qwen2, vocab 151936, ctx 4096, loaded in 0.04 s, self-test 0/0 (max |dlogit| 0.00e+00), threads 8"
+  }
+}

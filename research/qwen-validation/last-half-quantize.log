@@ -1,0 +1,2 @@
+calibration: 2044 tokens, 169 matrices observed, 97 Hessians
+research/qwen-validation/artifacts/qwen.f32.qpack -> research/qwen-validation/artifacts/last-half.qpack: 1891.3 MiB -> 352.4 MiB, q4 302.8M / q8 191.2M / other 0.1M params, 178.6 s

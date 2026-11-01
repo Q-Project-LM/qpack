@@ -1,0 +1,3 @@
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Loading weights:   0%|          | 0/290 [00:00<?, ?it/s]Loading weights:  27%|██▋       | 79/290 [00:00<00:00, 789.74it/s]Loading weights: 100%|██████████| 290/290 [00:00<00:00, 1558.49it/s]
+research/qwen-validation/artifacts/qwen-reference.f32.qpack: 1891.3 MiB, 494.0M params, 295 blobs, format QPACK1

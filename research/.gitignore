@@ -2,3 +2,6 @@
 __pycache__/
 
 attempt-*/quantize
+
+qwen-validation/hf/
+qwen-validation/artifacts/

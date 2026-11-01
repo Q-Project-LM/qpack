@@ -1,0 +1,106 @@
+[
+  {
+    "label": "no-act-order-quantize",
+    "args": [
+      "build/qpack-quantize",
+      "research/qwen-validation/artifacts/qwen.f32.qpack",
+      "research/qwen-validation/artifacts/no-act-order.qpack",
+      "--type",
+      "q4m",
+      "--calib",
+      "research/matrix-20261102-003657/data/calib.txt",
+      "--calib-tokens",
+      "2044",
+      "--gptq",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 178.18267941474915
+  },
+  {
+    "label": "no-act-order-selftest",
+    "args": [
+      "build/qpack-cli",
+      "-m",
+      "research/qwen-validation/artifacts/no-act-order.qpack",
+      "--selftest",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 0.04262089729309082
+  },
+  {
+    "label": "no-act-order-wiki-ru",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/qwen-validation/artifacts/no-act-order.qpack",
+      "-f",
+      "research/matrix-20261102-003657/data/eval-ru.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "4",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 19.671533823013306
+  },
+  {
+    "label": "no-act-order-wiki-en",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/qwen-validation/artifacts/no-act-order.qpack",
+      "-f",
+      "research/matrix-20261102-003657/data/eval-en.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "4",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 22.888236045837402
+  },
+  {
+    "label": "no-act-order-extended-ru",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/qwen-validation/artifacts/no-act-order.qpack",
+      "-f",
+      "research/extended-holdout/ru.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "4",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 19.0060772895813
+  },
+  {
+    "label": "no-act-order-extended-en",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/qwen-validation/artifacts/no-act-order.qpack",
+      "-f",
+      "research/extended-holdout/en.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "4",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 26.110320568084717
+  }
+]

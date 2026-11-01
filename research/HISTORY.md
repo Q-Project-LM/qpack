@@ -60,3 +60,7 @@ Finished matrix-20261102-020806: 18/18 variants completed successfully; see SUMM
 
 ## Экспериментальный q4m-last-half
 Режим встроен отдельным флагом. Для N-Q 8 слоёв все шесть PPL ниже q4m act-order при одинаковом размере 31582336 байт. Selftest 5/5; интегрированная версия совпала с прототипом по расширенной PPL. Старый q4m побайтно воспроизводится. Регрессия 18 режимов: research/matrix-20261102-020806/SUMMARY.md; все старые веса совпали по SHA256. Результат ограничен одной моделью и связанными текстами. Аудит: q4m-last-half-validation/AUDIT.json.
+
+## Qwen2.5-0.5B-Instruct follow-up
+
+Compared default q4m GPTQ act-order with experimental last-half allocation at essentially equal size. Last-half regressed in 3/4 Russian/English evaluation sets. Kept the existing default for Qwen and documented that the opt-in is model-specific. A second experiment without act-order improved 2/4 sets but regressed in 2/4, so it does not establish a universal improvement. Transformer-reference f32 conversion passed 5/5 selftest; NumPy-converted quantized models have no embedded reference cases (0/0). Details, commands, source revision and metrics: qwen-validation/SUMMARY.md and qwen-no-act-order/.

@@ -1,0 +1,1 @@
+research/qwen-validation/artifacts/default.qpack: llama:qwen2, vocab 151936, ctx 4096, loaded in 0.04 s, self-test 0/0 (max |dlogit| 0.00e+00), threads 8

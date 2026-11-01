@@ -1,0 +1,56 @@
+{
+  "default": {
+    "bytes": 369546048,
+    "sha256": "e538f17606270a91eeb42e00a175db446a3c2284939609796277d1b9c3c3bdf7",
+    "ppl": {
+      "wiki-ru": {
+        "tokens": 1020,
+        "nll": 2.34925,
+        "ppl": 10.4777
+      },
+      "wiki-en": {
+        "tokens": 1020,
+        "nll": 2.74134,
+        "ppl": 15.5078
+      },
+      "extended-ru": {
+        "tokens": 1020,
+        "nll": 2.99577,
+        "ppl": 20.0007
+      },
+      "extended-en": {
+        "tokens": 1020,
+        "nll": 2.73029,
+        "ppl": 15.3373
+      }
+    },
+    "selftest_output": "research/qwen-validation/artifacts/default.qpack: llama:qwen2, vocab 151936, ctx 4096, loaded in 0.04 s, self-test 0/0 (max |dlogit| 0.00e+00), threads 8"
+  },
+  "last-half": {
+    "bytes": 369546112,
+    "sha256": "392dd31dc1e2ee4513abaa7f453fc4da426030914c0f2571f0e59460c1967cfc",
+    "ppl": {
+      "wiki-ru": {
+        "tokens": 1020,
+        "nll": 2.35233,
+        "ppl": 10.51
+      },
+      "wiki-en": {
+        "tokens": 1020,
+        "nll": 2.7446,
+        "ppl": 15.5584
+      },
+      "extended-ru": {
+        "tokens": 1020,
+        "nll": 3.00561,
+        "ppl": 20.1986
+      },
+      "extended-en": {
+        "tokens": 1020,
+        "nll": 2.72886,
+        "ppl": 15.3154
+      }
+    },
+    "selftest_output": "research/qwen-validation/artifacts/last-half.qpack: llama:qwen2, vocab 151936, ctx 4096, loaded in 0.04 s, self-test 0/0 (max |dlogit| 0.00e+00), threads 8"
+  }
+}

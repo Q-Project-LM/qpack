@@ -1,0 +1,9 @@
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/workspace/qpack/python/qpack/convert_np.py", line 111, in <module>
+    main()
+  File "/workspace/qpack/python/qpack/convert_np.py", line 73, in main
+    cfg = json.load(open(f"{src}/config.json")); tc = json.load(open(f"{src}/tokenizer_config.json"))
+                                                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'research/qwen-validation/hf/tokenizer_config.json'

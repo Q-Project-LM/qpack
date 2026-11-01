@@ -1,0 +1,213 @@
+[
+  {
+    "label": "default-quantize",
+    "args": [
+      "build/qpack-quantize",
+      "research/qwen-validation/artifacts/qwen.f32.qpack",
+      "research/qwen-validation/artifacts/default.qpack",
+      "--type",
+      "q4m",
+      "--calib",
+      "research/matrix-20261102-003657/data/calib.txt",
+      "--calib-tokens",
+      "2044",
+      "--gptq",
+      "--act-order",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 179.53078508377075
+  },
+  {
+    "label": "default-selftest",
+    "args": [
+      "build/qpack-cli",
+      "-m",
+      "research/qwen-validation/artifacts/default.qpack",
+      "--selftest",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 0.04466366767883301
+  },
+  {
+    "label": "default-wiki-ru",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/qwen-validation/artifacts/default.qpack",
+      "-f",
+      "research/matrix-20261102-003657/data/eval-ru.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "4",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 18.831650733947754
+  },
+  {
+    "label": "default-wiki-en",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/qwen-validation/artifacts/default.qpack",
+      "-f",
+      "research/matrix-20261102-003657/data/eval-en.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "4",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 21.83772039413452
+  },
+  {
+    "label": "default-extended-ru",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/qwen-validation/artifacts/default.qpack",
+      "-f",
+      "research/extended-holdout/ru.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "4",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 17.15382671356201
+  },
+  {
+    "label": "default-extended-en",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/qwen-validation/artifacts/default.qpack",
+      "-f",
+      "research/extended-holdout/en.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "4",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 22.959757566452026
+  },
+  {
+    "label": "last-half-quantize",
+    "args": [
+      "build/qpack-quantize",
+      "research/qwen-validation/artifacts/qwen.f32.qpack",
+      "research/qwen-validation/artifacts/last-half.qpack",
+      "--type",
+      "q4m",
+      "--calib",
+      "research/matrix-20261102-003657/data/calib.txt",
+      "--calib-tokens",
+      "2044",
+      "--gptq",
+      "--act-order",
+      "-t",
+      "8",
+      "--q4m-last-half"
+    ],
+    "code": 0,
+    "seconds": 178.85766315460205
+  },
+  {
+    "label": "last-half-selftest",
+    "args": [
+      "build/qpack-cli",
+      "-m",
+      "research/qwen-validation/artifacts/last-half.qpack",
+      "--selftest",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 0.04336047172546387
+  },
+  {
+    "label": "last-half-wiki-ru",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/qwen-validation/artifacts/last-half.qpack",
+      "-f",
+      "research/matrix-20261102-003657/data/eval-ru.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "4",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 21.12661862373352
+  },
+  {
+    "label": "last-half-wiki-en",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/qwen-validation/artifacts/last-half.qpack",
+      "-f",
+      "research/matrix-20261102-003657/data/eval-en.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "4",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 23.005871295928955
+  },
+  {
+    "label": "last-half-extended-ru",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/qwen-validation/artifacts/last-half.qpack",
+      "-f",
+      "research/extended-holdout/ru.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "4",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 18.058306217193604
+  },
+  {
+    "label": "last-half-extended-en",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/qwen-validation/artifacts/last-half.qpack",
+      "-f",
+      "research/extended-holdout/en.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "4",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 23.068305253982544
+  }
+]

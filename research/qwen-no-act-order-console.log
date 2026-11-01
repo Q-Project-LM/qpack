@@ -1,0 +1,42 @@
+RUN no-act-order-quantize
+EXIT no-act-order-quantize 0 seconds 178.2
+RUN no-act-order-selftest
+EXIT no-act-order-selftest 0 seconds 0.0
+RUN no-act-order-wiki-ru
+EXIT no-act-order-wiki-ru 0 seconds 19.7
+RUN no-act-order-wiki-en
+EXIT no-act-order-wiki-en 0 seconds 22.9
+RUN no-act-order-extended-ru
+EXIT no-act-order-extended-ru 0 seconds 19.0
+RUN no-act-order-extended-en
+EXIT no-act-order-extended-en 0 seconds 26.1
+{
+  "no-act-order": {
+    "bytes": 369546048,
+    "sha256": "78e460d6aec9120d0107bb2f6b3c4159b06bf626272369b0f9db95657be6cddc",
+    "ppl": {
+      "wiki-ru": {
+        "tokens": 1020,
+        "nll": 2.32863,
+        "ppl": 10.2639
+      },
+      "wiki-en": {
+        "tokens": 1020,
+        "nll": 2.74858,
+        "ppl": 15.6204
+      },
+      "extended-ru": {
+        "tokens": 1020,
+        "nll": 3.00158,
+        "ppl": 20.1172
+      },
+      "extended-en": {
+        "tokens": 1020,
+        "nll": 2.71694,
+        "ppl": 15.1339
+      }
+    },
+    "selftest_output": "research/qwen-validation/artifacts/no-act-order.qpack: llama:qwen2, vocab 151936, ctx 4096, loaded in 0.04 s, self-test 0/0 (max |dlogit| 0.00e+00), threads 8"
+  }
+}
+COMPLETE
