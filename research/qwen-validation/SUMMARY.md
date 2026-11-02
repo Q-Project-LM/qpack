@@ -39,3 +39,16 @@ Same f32 input, q4m GPTQ act-order, text and evaluation; request 4096 calibratio
 | English fiction, 4080 tokens | 20.5985 | 20.4008 |
 
 The English fiction check was added after selecting this candidate; source and hashes are recorded in ../qwen-fiction-holdout/source.json. Selection and first four tests use short, partially related texts, so more datasets and architectures are needed. Quantized files still have no selftest cases. This is a calibration setting improvement on this model, not an algorithm or default change. See ../qwen-calib-4096/ and ../qwen-fiction-holdout/ for commands and logs.
+
+## Follow-up: 8176 calibration tokens
+
+Requested 8192 tokens; 8176 actually processed. Same f32 model, calibration text, q4m GPTQ act-order, evaluation settings, and 369546048-byte output as the 4088-token variant.
+
+| Dataset | 4088 tokens | 8176 tokens |
+|---|---:|---:|
+| wiki RU | 10.2960 | 10.3049 |
+| wiki EN | 15.3373 | 15.4286 |
+| extended RU | 19.7023 | 19.7803 |
+| extended EN | 15.1195 | 14.9807 |
+
+Three regressions and one improvement. Keep 4088-token setting as the preferred balanced choice on these samples; no default changes. One observed quantization time was 273.8 s versus 210.9 s for 4088 (single runs, not controlled benchmark). The sample sizes are small and the quantized models contain zero embedded selftest cases. Exact commands and logs: ../qwen-calib-8192/.

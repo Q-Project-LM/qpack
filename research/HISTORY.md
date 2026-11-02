@@ -68,3 +68,7 @@ Compared default q4m GPTQ act-order with experimental last-half allocation at es
 ## Qwen: more calibration tokens
 
 Repeated baseline q4m GPTQ act-order with 4088 actual calibration tokens instead of 2044. Equal 369546048-byte files; lower perplexity on all four prior sets and a newly added 4080-token English fiction holdout. Single-run conversion time increased from 179.5s to 210.9s. This supports the longer calibration setting for this model, not a universal algorithmic improvement. Details: qwen-validation/SUMMARY.md.
+
+## Qwen: 8176-token calibration attempt
+
+At identical file size, increasing calibration from 4088 to 8176 actual tokens worsened three evaluation sets and improved one. Kept 4088 as the balanced choice; no code/default change. See qwen-validation/SUMMARY.md and qwen-calib-8192/.

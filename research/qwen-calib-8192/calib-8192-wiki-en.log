@@ -1,0 +1,2 @@
+[1/4] ppl 10.5354[2/4] ppl 13.1440[3/4] ppl 13.9428[4/4] ppl 15.4286
+research/qwen-validation/artifacts/calib-8192.qpack: 1020 tokens, mean nll 2.73622, perplexity 15.4286

@@ -1,0 +1,29 @@
+{
+  "calib-8192": {
+    "bytes": 369546048,
+    "sha256": "6e3fb145e1f414fc8270e293e556fbcab0f89ca789554a8d292572bccc182599",
+    "ppl": {
+      "wiki-ru": {
+        "tokens": 1020,
+        "nll": 2.33262,
+        "ppl": 10.3049
+      },
+      "wiki-en": {
+        "tokens": 1020,
+        "nll": 2.73622,
+        "ppl": 15.4286
+      },
+      "extended-ru": {
+        "tokens": 1020,
+        "nll": 2.98469,
+        "ppl": 19.7803
+      },
+      "extended-en": {
+        "tokens": 1020,
+        "nll": 2.70676,
+        "ppl": 14.9807
+      }
+    },
+    "selftest_output": "research/qwen-validation/artifacts/calib-8192.qpack: llama:qwen2, vocab 151936, ctx 4096, loaded in 0.04 s, self-test 0/0 (max |dlogit| 0.00e+00), threads 8"
+  }
+}

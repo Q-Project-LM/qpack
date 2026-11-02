@@ -1,0 +1,107 @@
+[
+  {
+    "label": "calib-8192-quantize",
+    "args": [
+      "build/qpack-quantize",
+      "research/qwen-validation/artifacts/qwen.f32.qpack",
+      "research/qwen-validation/artifacts/calib-8192.qpack",
+      "--type",
+      "q4m",
+      "--calib",
+      "research/matrix-20261102-003657/data/calib.txt",
+      "--calib-tokens",
+      "8192",
+      "--gptq",
+      "--act-order",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 273.987202167511
+  },
+  {
+    "label": "calib-8192-selftest",
+    "args": [
+      "build/qpack-cli",
+      "-m",
+      "research/qwen-validation/artifacts/calib-8192.qpack",
+      "--selftest",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 0.04492926597595215
+  },
+  {
+    "label": "calib-8192-wiki-ru",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/qwen-validation/artifacts/calib-8192.qpack",
+      "-f",
+      "research/matrix-20261102-003657/data/eval-ru.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "4",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 21.233580112457275
+  },
+  {
+    "label": "calib-8192-wiki-en",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/qwen-validation/artifacts/calib-8192.qpack",
+      "-f",
+      "research/matrix-20261102-003657/data/eval-en.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "4",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 24.857720613479614
+  },
+  {
+    "label": "calib-8192-extended-ru",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/qwen-validation/artifacts/calib-8192.qpack",
+      "-f",
+      "research/extended-holdout/ru.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "4",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 18.558589935302734
+  },
+  {
+    "label": "calib-8192-extended-en",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/qwen-validation/artifacts/calib-8192.qpack",
+      "-f",
+      "research/extended-holdout/en.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "4",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 24.439358472824097
+  }
+]
