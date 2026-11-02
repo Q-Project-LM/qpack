@@ -1,0 +1,42 @@
+RUN reference-quant-quantize
+EXIT reference-quant-quantize 0 seconds 215.8
+RUN reference-quant-selftest
+EXIT reference-quant-selftest 0 seconds 1.1
+RUN reference-quant-wiki-ru
+EXIT reference-quant-wiki-ru 0 seconds 21.6
+RUN reference-quant-wiki-en
+EXIT reference-quant-wiki-en 0 seconds 24.4
+RUN reference-quant-extended-ru
+EXIT reference-quant-extended-ru 0 seconds 19.9
+RUN reference-quant-extended-en
+EXIT reference-quant-extended-en 0 seconds 23.7
+{
+  "reference-quant": {
+    "bytes": 369547200,
+    "sha256": "f07de13a49d1c42b62449c514ecd79269aa108b2d5e29662baa72ac038c019c9",
+    "ppl": {
+      "wiki-ru": {
+        "tokens": 1020,
+        "nll": 2.33175,
+        "ppl": 10.296
+      },
+      "wiki-en": {
+        "tokens": 1020,
+        "nll": 2.73029,
+        "ppl": 15.3373
+      },
+      "extended-ru": {
+        "tokens": 1020,
+        "nll": 2.98074,
+        "ppl": 19.7023
+      },
+      "extended-en": {
+        "tokens": 1020,
+        "nll": 2.71598,
+        "ppl": 15.1195
+      }
+    },
+    "selftest_output": "research/qwen-validation/artifacts/reference-quant.qpack: llama:qwen2, vocab 151936, ctx 4096, loaded in 0.04 s, self-test 5/5 (max |dlogit| 6.92e-03), threads 8"
+  }
+}
+COMPLETE

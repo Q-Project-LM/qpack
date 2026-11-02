@@ -52,3 +52,9 @@ Requested 8192 tokens; 8176 actually processed. Same f32 model, calibration text
 | extended EN | 15.1195 | 14.9807 |
 
 Three regressions and one improvement. Keep 4088-token setting as the preferred balanced choice on these samples; no default changes. One observed quantization time was 273.8 s versus 210.9 s for 4088 (single runs, not controlled benchmark). The sample sizes are small and the quantized models contain zero embedded selftest cases. Exact commands and logs: ../qwen-calib-8192/.
+
+## Quantized kernel self-test with nonempty cases
+
+Re-quantized qwen-reference.f32.qpack, which was produced by the Transformers converter and has five test cases, with q4m GPTQ act-order and 4088 actual calibration tokens. qpack-quantize recomputes the test reference on its dequantized copy of the quantized output, then qpack-cli self-test checks the quantized kernels against that reference: 5/5, max absolute logit difference 6.92e-3. This checks implementation consistency on five cases, not quantization quality against the original Transformers model.
+
+All four PPL and NLL results match the existing 4088-token NumPy-converted variant to printed precision, 1020 tokens each. Output sizes are 369547200 and 369546048 bytes respectively; the former includes self-test data and other container metadata. See ../qwen-reference-quant/ and ../qwen_reference_quant.py. No code or default changed.

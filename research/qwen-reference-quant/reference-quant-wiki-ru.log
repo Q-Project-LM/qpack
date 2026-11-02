@@ -1,0 +1,2 @@
+[1/4] ppl 9.5179[2/4] ppl 9.5451[3/4] ppl 9.5731[4/4] ppl 10.2960
+research/qwen-validation/artifacts/reference-quant.qpack: 1020 tokens, mean nll 2.33175, perplexity 10.2960

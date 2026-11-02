@@ -1,0 +1,107 @@
+[
+  {
+    "label": "reference-quant-quantize",
+    "args": [
+      "build/qpack-quantize",
+      "research/qwen-validation/artifacts/qwen-reference.f32.qpack",
+      "research/qwen-validation/artifacts/reference-quant.qpack",
+      "--type",
+      "q4m",
+      "--calib",
+      "research/matrix-20261102-003657/data/calib.txt",
+      "--calib-tokens",
+      "4096",
+      "--gptq",
+      "--act-order",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 215.78016805648804
+  },
+  {
+    "label": "reference-quant-selftest",
+    "args": [
+      "build/qpack-cli",
+      "-m",
+      "research/qwen-validation/artifacts/reference-quant.qpack",
+      "--selftest",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 1.0861330032348633
+  },
+  {
+    "label": "reference-quant-wiki-ru",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/qwen-validation/artifacts/reference-quant.qpack",
+      "-f",
+      "research/matrix-20261102-003657/data/eval-ru.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "4",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 21.644526481628418
+  },
+  {
+    "label": "reference-quant-wiki-en",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/qwen-validation/artifacts/reference-quant.qpack",
+      "-f",
+      "research/matrix-20261102-003657/data/eval-en.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "4",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 24.438392400741577
+  },
+  {
+    "label": "reference-quant-extended-ru",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/qwen-validation/artifacts/reference-quant.qpack",
+      "-f",
+      "research/extended-holdout/ru.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "4",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 19.896220445632935
+  },
+  {
+    "label": "reference-quant-extended-en",
+    "args": [
+      "build/qpack-perplexity",
+      "-m",
+      "research/qwen-validation/artifacts/reference-quant.qpack",
+      "-f",
+      "research/extended-holdout/en.txt",
+      "-c",
+      "256",
+      "--chunks",
+      "4",
+      "-t",
+      "8"
+    ],
+    "code": 0,
+    "seconds": 23.718369007110596
+  }
+]

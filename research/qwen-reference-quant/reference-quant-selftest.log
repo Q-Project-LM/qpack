@@ -1,0 +1,1 @@
+research/qwen-validation/artifacts/reference-quant.qpack: llama:qwen2, vocab 151936, ctx 4096, loaded in 0.04 s, self-test 5/5 (max |dlogit| 6.92e-03), threads 8

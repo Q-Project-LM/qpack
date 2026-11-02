@@ -72,3 +72,7 @@ Repeated baseline q4m GPTQ act-order with 4088 actual calibration tokens instead
 ## Qwen: 8176-token calibration attempt
 
 At identical file size, increasing calibration from 4088 to 8176 actual tokens worsened three evaluation sets and improved one. Kept 4088 as the balanced choice; no code/default change. See qwen-validation/SUMMARY.md and qwen-calib-8192/.
+
+## Qwen: quantized self-test
+
+Re-quantized Transformers-converted f32 input at 4088 calibration tokens, retaining and recomputing five self-test cases against the dequantized output. Quantized self-test passed 5/5 (max absolute logit difference 6.92e-3); four perplexities match the earlier NumPy-converted model to printed precision. This verifies kernel consistency for these inputs, not quality versus the original model. Details: qwen-validation/SUMMARY.md and qwen-reference-quant/.
