@@ -29,6 +29,7 @@ namespace {
 // at xq[0, cols) and xq[PLANE, PLANE + cols); a dot product costs two dp4a per 4 columns. (One int8 plane has ~1% relative error
 // per matrix, which adds up to ~0.1 logit units over 24 layers.)
 constexpr int PLANE = 8192;
+constexpr int UN = 1;   // independent weight loads in flight per lane
 enum { K_Q8 = 0, K_Q4 = 1, K_Q1 = 2, K_F16 = 3, K_F32 = 4 };
 struct DMat { const void *q; const void *s; int rows, cols, kind; };
 
@@ -55,24 +56,38 @@ __device__ __forceinline__ float row_dot(const DMat &m, int r, int l, const int4
   if (m.kind == K_Q4) {
     const int G = cols >> 5;
     const uint4 *w = (const uint4 *)((const uint8_t *)m.q + (size_t)r * (cols >> 1)); const unsigned short *s = (const unsigned short *)m.s + (size_t)r * G;
-    for (int g = l; g < G; g += 32) {
-      const uint4 v = __ldg(w + g); const int4 xl = sx[2 * g], xh = sx[2 * g + 1], ll = sl[2 * g], lh = sl[2 * g + 1]; const unsigned M = 0x0F0F0F0Fu;
-      const unsigned w0 = v.x & M, w1 = v.y & M, w2 = v.z & M, w3 = v.w & M, w4 = (v.x >> 4) & M, w5 = (v.y >> 4) & M, w6 = (v.z >> 4) & M, w7 = (v.w >> 4) & M;
-      int d = dp4a_us(w0, xl.x, 0); d = dp4a_us(w1, xl.y, d); d = dp4a_us(w2, xl.z, d); d = dp4a_us(w3, xl.w, d);
-      d = dp4a_us(w4, xh.x, d); d = dp4a_us(w5, xh.y, d); d = dp4a_us(w6, xh.z, d); d = dp4a_us(w7, xh.w, d);
-      int e = dp4a_uu(w0, (unsigned)ll.x, 0); e = dp4a_uu(w1, (unsigned)ll.y, e); e = dp4a_uu(w2, (unsigned)ll.z, e); e = dp4a_uu(w3, (unsigned)ll.w, e);
-      e = dp4a_uu(w4, (unsigned)lh.x, e); e = dp4a_uu(w5, (unsigned)lh.y, e); e = dp4a_uu(w6, (unsigned)lh.z, e); e = dp4a_uu(w7, (unsigned)lh.w, e);
-      d = (d << 8) + e - 8 * sxsum[g];
-      acc += (float)d * (sxs[g] * h2f(__ldg(s + g)));
+    for (int gb = 0; gb < G; gb += 32 * UN) {
+      uint4 vv[UN];
+#pragma unroll
+      for (int u = 0; u < UN; u++) { const int g = gb + l + 32 * u; if (g < G) vv[u] = __ldg(w + g); }
+#pragma unroll
+      for (int u = 0; u < UN; u++) {
+        const int g = gb + l + 32 * u; if (g >= G) break;
+        const uint4 v = vv[u]; const int4 xl = sx[2 * g], xh = sx[2 * g + 1], ll = sl[2 * g], lh = sl[2 * g + 1]; const unsigned M = 0x0F0F0F0Fu;
+        const unsigned w0 = v.x & M, w1 = v.y & M, w2 = v.z & M, w3 = v.w & M, w4 = (v.x >> 4) & M, w5 = (v.y >> 4) & M, w6 = (v.z >> 4) & M, w7 = (v.w >> 4) & M;
+        int d = dp4a_us(w0, xl.x, 0); d = dp4a_us(w1, xl.y, d); d = dp4a_us(w2, xl.z, d); d = dp4a_us(w3, xl.w, d);
+        d = dp4a_us(w4, xh.x, d); d = dp4a_us(w5, xh.y, d); d = dp4a_us(w6, xh.z, d); d = dp4a_us(w7, xh.w, d);
+        int e = dp4a_uu(w0, (unsigned)ll.x, 0); e = dp4a_uu(w1, (unsigned)ll.y, e); e = dp4a_uu(w2, (unsigned)ll.z, e); e = dp4a_uu(w3, (unsigned)ll.w, e);
+        e = dp4a_uu(w4, (unsigned)lh.x, e); e = dp4a_uu(w5, (unsigned)lh.y, e); e = dp4a_uu(w6, (unsigned)lh.z, e); e = dp4a_uu(w7, (unsigned)lh.w, e);
+        d = (d << 8) + e - 8 * sxsum[g];
+        acc += (float)d * (sxs[g] * h2f(__ldg(s + g)));
+      }
     }
   } else if (m.kind == K_Q8) {
     const int nch = cols >> 4; const uint4 *w = (const uint4 *)((const int8_t *)m.q + (size_t)r * cols);
-    for (int c = l; c < nch; c += 32) {
-      const uint4 v = __ldg(w + c); const int4 x = sx[c], y = sl[c];
-      int d = __dp4a((int)v.x, x.x, 0); d = __dp4a((int)v.y, x.y, d); d = __dp4a((int)v.z, x.z, d); d = __dp4a((int)v.w, x.w, d);
-      int e = dp4a_su((int)v.x, (unsigned)y.x, 0); e = dp4a_su((int)v.y, (unsigned)y.y, e); e = dp4a_su((int)v.z, (unsigned)y.z, e); e = dp4a_su((int)v.w, (unsigned)y.w, e);
-      d = (d << 8) + e;
-      acc += (float)d * sxs[c >> 1];
+    for (int cb = 0; cb < nch; cb += 32 * UN) {
+      uint4 vv[UN];
+#pragma unroll
+      for (int u = 0; u < UN; u++) { const int c = cb + l + 32 * u; if (c < nch) vv[u] = __ldg(w + c); }
+#pragma unroll
+      for (int u = 0; u < UN; u++) {
+        const int c = cb + l + 32 * u; if (c >= nch) break;
+        const uint4 v = vv[u]; const int4 x = sx[c], y = sl[c];
+        int d = __dp4a((int)v.x, x.x, 0); d = __dp4a((int)v.y, x.y, d); d = __dp4a((int)v.z, x.z, d); d = __dp4a((int)v.w, x.w, d);
+        int e = dp4a_su((int)v.x, (unsigned)y.x, 0); e = dp4a_su((int)v.y, (unsigned)y.y, e); e = dp4a_su((int)v.z, (unsigned)y.z, e); e = dp4a_su((int)v.w, (unsigned)y.w, e);
+        d = (d << 8) + e;
+        acc += (float)d * sxs[c >> 1];
+      }
     }
     acc *= ((const float *)m.s)[r];
   } else {   // q1: lane takes 32 columns (4 bytes of sign bits); sum(x * +-1) = 2 * sum(x[bit=1]) - sum(x)
@@ -103,17 +118,17 @@ __global__ void k_embed(DMat e, const Ctl *ctl, float *x) {
   }
 }
 
-// y = rmsnorm(x) * w, quantised to int8 per 32 columns (one block); optionally also stored as float
-__global__ void __launch_bounds__(256) k_norm_actq(const float *x, const float *w, int n, float eps, int8_t *xq, float *xs, int *xsum, float *yf) {
-  __shared__ float red[8]; __shared__ float sy[1024];
-  float ss = 0; for (int i = threadIdx.x; i < n; i += 256) ss += x[i] * x[i];
-  ss = warp_sum(ss); if ((threadIdx.x & 31) == 0) red[threadIdx.x >> 5] = ss; __syncthreads();
-  float t = 0; for (int i = 0; i < 8; i++) t += red[i];
-  const float inv = 1.f / sqrtf(t / n + eps);
-  for (int i = threadIdx.x; i < n; i += 256) { const float y = x[i] * inv * w[i]; sy[i] = y; if (yf) yf[i] = y; }
+// y = rmsnorm(x) * w, quantised per 32 columns (one block of 1024 threads, n <= 1024); optionally also stored as float
+__global__ void __launch_bounds__(1024) k_norm_actq(const float *x, const float *w, int n, float eps, int8_t *xq, float *xs, int *xsum, float *yf) {
+  __shared__ float red[32]; __shared__ float sy[1024];
+  const int t = threadIdx.x, wp = t >> 5, l = t & 31;
+  const float xv = t < n ? x[t] : 0.f;
+  float ss = warp_sum(xv * xv); if (l == 0) red[wp] = ss; __syncthreads();
+  float tot = 0; for (int i = 0; i < 32; i++) tot += red[i];
+  const float inv = 1.f / sqrtf(tot / n + eps);
+  if (t < n) { const float y = xv * inv * w[t]; sy[t] = y; if (yf) yf[t] = y; }
   __syncthreads();
-  const int wp = threadIdx.x >> 5, l = threadIdx.x & 31;
-  for (int g = wp; g < (n >> 5); g += 8) warp_actq(sy[g * 32 + l], g, l, xq, xs, xsum);
+  if (wp < (n >> 5)) warp_actq(sy[t], wp, l, xq, xs, xsum);
 }
 
 struct MvArgs {
@@ -140,71 +155,82 @@ template <int WPB> __global__ void __launch_bounds__(WPB * 32) k_mv(MvArgs a) {
   }
 }
 
-// gate and up rows for 32 consecutive output rows per block (one row per warp), h = silu(gate) * up, quantised to int8
-__global__ void __launch_bounds__(1024) k_gateup(DMat g, DMat u, const int8_t *xq, const float *xs, const int *xsum, int8_t *hq, float *hs, int *hsum) {
+// gate and up rows for 32 consecutive output rows per block (NW warps, 32 / NW rows each), h = silu(gate) * up, quantised
+template <int NW> __global__ void __launch_bounds__(NW * 32) k_gateup(DMat g, DMat u, const int8_t *xq, const float *xs, const int *xsum, int8_t *hq, float *hs, int *hsum) {
   extern __shared__ int4 smem[];
   const int cols = g.cols, G = cols >> 5;
   int4 *sx = smem, *sl = smem + (cols >> 4); float *sxs = (float *)(smem + 2 * (cols >> 4)); int *sxsum = (int *)(sxs + G); __shared__ float sh[32];
-  for (int i = threadIdx.x; i < (cols >> 4); i += 1024) { sx[i] = ((const int4 *)xq)[i]; sl[i] = ((const int4 *)(xq + PLANE))[i]; }
-  for (int i = threadIdx.x; i < G; i += 1024) { sxs[i] = xs[i]; sxsum[i] = xsum[i]; }
+  for (int i = threadIdx.x; i < (cols >> 4); i += NW * 32) { sx[i] = ((const int4 *)xq)[i]; sl[i] = ((const int4 *)(xq + PLANE))[i]; }
+  for (int i = threadIdx.x; i < G; i += NW * 32) { sxs[i] = xs[i]; sxsum[i] = xsum[i]; }
   __syncthreads();
-  const int wp = threadIdx.x >> 5, l = threadIdx.x & 31, r = blockIdx.x * 32 + wp;
-  const float gg = row_dot(g, r, l, sx, sl, sxs, sxsum), uu = row_dot(u, r, l, sx, sl, sxs, sxsum);
-  if (l == 0) sh[wp] = gg / (1.f + expf(-gg)) * uu;
+  const int wp = threadIdx.x >> 5, l = threadIdx.x & 31;
+  for (int i = 0; i < 32 / NW; i++) {
+    const int rl = wp * (32 / NW) + i, r = blockIdx.x * 32 + rl;
+    const float gg = row_dot(g, r, l, sx, sl, sxs, sxsum), uu = row_dot(u, r, l, sx, sl, sxs, sxsum);
+    if (l == 0) sh[rl] = gg / (1.f + expf(-gg)) * uu;
+  }
   __syncthreads();
   if (wp == 0) warp_actq(sh[l], blockIdx.x, l, hq, hs, hsum);
 }
 
-// rope for q (in place, float) and k; k and v appended to the fp16 cache at position pos
-__global__ void k_rope_kv(float *q, const float *k, const float *v, const float *cs, const float *sn, const Ctl *ctl, __half *kl, __half *vl, int nh, int nkv, int hd) {
-  const int half = hd / 2, pos = ctl->pos, kvd = nkv * hd; const float *c = cs + (size_t)pos * half, *s = sn + (size_t)pos * half;
-  for (int i = threadIdx.x; i < nh * half; i += blockDim.x) {
-    const int h = i / half, j = i % half; float *p = q + h * hd; const float a = p[j], b = p[j + half];
-    p[j] = a * c[j] - b * s[j]; p[j + half] = b * c[j] + a * s[j];
+constexpr int CH = 16;   // positions per attention block
+// block = (kv group, chunk of CH positions), HD threads = CH positions x SPLIT lanes (16 dims each). q is rotated on the fly; the
+// block holding the current position also rotates k and appends k / v to the fp16 cache.
+template <int HD> __global__ void __launch_bounds__(HD) k_attn(const float *q, const float *kn, const float *vn, const float *cs, const float *sn, const __half *kcc, const __half *vcc,
+                                                               float *part, const Ctl *ctl, int rep, int nkv, int nch, float scl, int dbg) {
+  __half *kc = (__half *)kcc, *vc = (__half *)vcc;
+  constexpr int SPLIT = HD / CH;   // 4 (hd 64) or 8 (hd 128)
+  const int g = blockIdx.x, c = blockIdx.y, pos = ctl->pos, T = pos + 1, t0 = c * CH; if (t0 >= T) return;
+  const int n = min(CH, T - t0), tid = threadIdx.x, kvd = nkv * HD, half = HD / 2;
+  __shared__ __align__(16) float sq[8 * HD]; __shared__ float sc[8][CH]; __shared__ float pm[8], ps[8];
+  const float *cp = cs + (size_t)pos * half, *sp = sn + (size_t)pos * half;
+  if (tid < half) {
+    const float cc = cp[tid], ss = sp[tid]; float qa[8], qb[8];
+#pragma unroll
+    for (int j = 0; j < 8; j++) if (j < rep) { const float *p = q + (size_t)(g * rep + j) * HD; qa[j] = p[tid]; qb[j] = p[tid + half]; }
+#pragma unroll
+    for (int j = 0; j < 8; j++) if (j < rep) { sq[j * HD + tid] = qa[j] * cc - qb[j] * ss; sq[j * HD + tid + half] = qb[j] * cc + qa[j] * ss; }
   }
-  for (int i = threadIdx.x; i < nkv * half; i += blockDim.x) {
-    const int h = i / half, j = i % half; const float *p = k + h * hd; const float a = p[j], b = p[j + half];
-    kl[(size_t)pos * kvd + h * hd + j] = __float2half(a * c[j] - b * s[j]); kl[(size_t)pos * kvd + h * hd + j + half] = __float2half(b * c[j] + a * s[j]);
-  }
-  for (int i = threadIdx.x; i < kvd; i += blockDim.x) vl[(size_t)pos * kvd + i] = __float2half(v[i]);
-}
-
-constexpr int CH = 128;   // positions per attention block
-// block (kv group, chunk of CH positions); thread t scores position t0 + t for the `rep` query heads of the group
-template <int HD> __global__ void __launch_bounds__(128) k_attn(const float *q, const __half *kc, const __half *vc, float *part, const Ctl *ctl, int rep, int nkv, int nch, float scl) {
-  const int g = blockIdx.x, c = blockIdx.y, T = ctl->pos + 1, t0 = c * CH; if (t0 >= T) return;
-  const int n = min(CH, T - t0), tid = threadIdx.x, kvd = nkv * HD;
-  __shared__ float sq[8 * HD]; __shared__ float sc[8][CH]; __shared__ float pm[8], ps[8];
-  for (int i = tid; i < rep * HD; i += 128) sq[i] = q[(size_t)g * rep * HD + i];
-  __syncthreads();
-  if (tid < n) {
-    float s[8]; for (int j = 0; j < 8; j++) s[j] = 0;
-    const uint4 *kr = (const uint4 *)(kc + (size_t)(t0 + tid) * kvd + g * HD);
-    for (int d8 = 0; d8 < HD / 8; d8++) {
-      const uint4 u = kr[d8]; const __half2 *h2 = (const __half2 *)&u;
-      float kf[8]; for (int e = 0; e < 4; e++) { const float2 f = __half22float2(h2[e]); kf[2 * e] = f.x; kf[2 * e + 1] = f.y; }
-      for (int j = 0; j < 8; j++) if (j < rep) { for (int e = 0; e < 8; e++) s[j] = fmaf(sq[j * HD + d8 * 8 + e], kf[e], s[j]); }
+  if (pos >= t0 && pos < t0 + CH) {   // this block owns the current position of its group
+    vc[(size_t)pos * kvd + g * HD + tid] = __float2half(vn[g * HD + tid]);
+    if (tid < half) {
+      const float cc = cp[tid], ss = sp[tid], a = kn[g * HD + tid], b = kn[g * HD + tid + half];
+      kc[(size_t)pos * kvd + g * HD + tid] = __float2half(a * cc - b * ss); kc[(size_t)pos * kvd + g * HD + tid + half] = __float2half(b * cc + a * ss);
     }
-    for (int j = 0; j < 8; j++) if (j < rep) sc[j][tid] = s[j] * scl;
   }
   __syncthreads();
+  if (dbg == 1) return;
+  {
+    const int p = tid / SPLIT, sb = tid % SPLIT; float s[8]; for (int j = 0; j < 8; j++) s[j] = 0;
+    if (p < n) {
+      const uint4 *kr = (const uint4 *)(kc + (size_t)(t0 + p) * kvd + g * HD + sb * 16);
+      const uint4 u0 = kr[0], u1 = kr[1]; float kf[16];
+      { const __half2 *h2 = (const __half2 *)&u0; for (int e = 0; e < 4; e++) { const float2 f = __half22float2(h2[e]); kf[2 * e] = f.x; kf[2 * e + 1] = f.y; } }
+      { const __half2 *h2 = (const __half2 *)&u1; for (int e = 0; e < 4; e++) { const float2 f = __half22float2(h2[e]); kf[8 + 2 * e] = f.x; kf[9 + 2 * e] = f.y; } }
+      for (int j = 0; j < 8; j++) if (j < rep) { const float4 *qj = (const float4 *)(sq + j * HD + sb * 16); for (int e = 0; e < 4; e++) { const float4 qv = qj[e]; s[j] = fmaf(qv.x, kf[4 * e], s[j]); s[j] = fmaf(qv.y, kf[4 * e + 1], s[j]); s[j] = fmaf(qv.z, kf[4 * e + 2], s[j]); s[j] = fmaf(qv.w, kf[4 * e + 3], s[j]); } }
+    }
+    for (int j = 0; j < 8; j++) { float v = s[j]; for (int o = 1; o < SPLIT; o <<= 1) v += __shfl_xor_sync(~0u, v, o); if (j < rep && sb == 0 && p < n) sc[j][p] = v * scl; }
+  }
+  __syncthreads();
+  if (dbg == 2) return;
   const int wp = tid >> 5, l = tid & 31;
-  for (int j = wp; j < rep; j += 4) {
+  for (int j = wp; j < rep; j += HD / 32) {
     float mx = -1e30f; for (int t = l; t < n; t += 32) mx = fmaxf(mx, sc[j][t]);
     for (int o = 16; o; o >>= 1) mx = fmaxf(mx, __shfl_xor_sync(~0u, mx, o));
     float sum = 0; for (int t = l; t < n; t += 32) { const float e = expf(sc[j][t] - mx); sc[j][t] = e; sum += e; }
     sum = warp_sum(sum); if (l == 0) { pm[j] = mx; ps[j] = sum; }
   }
   __syncthreads();
-  constexpr int GR = 128 / HD;   // thread groups splitting the heads (2 for hd 64, 1 for hd 128)
-  const int d = tid % HD, grp = tid / HD; float acc[8]; for (int j = 0; j < 8; j++) acc[j] = 0;
-  for (int t = 0; t < n; t++) {
-    const float v = __half2float(vc[(size_t)(t0 + t) * kvd + g * HD + d]);
+  if (dbg == 3) return;
+  float acc[8]; for (int j = 0; j < 8; j++) acc[j] = 0;
+  float vv[CH]; for (int t = 0; t < CH; t++) vv[t] = t < n ? __half2float(vc[(size_t)(t0 + t) * kvd + g * HD + tid]) : 0.f;
 #pragma unroll
-    for (int i = 0; i < 8; i++) { const int j = grp + i * GR; if (j < rep) acc[i] = fmaf(sc[j][t], v, acc[i]); }
+  for (int t = 0; t < CH; t++) {
+#pragma unroll
+    for (int j = 0; j < 8; j++) if (j < rep) acc[j] = fmaf(t < n ? sc[j][t] : 0.f, vv[t], acc[j]);
   }
 #pragma unroll
-  for (int i = 0; i < 8; i++) { const int j = grp + i * GR; if (j < rep) { float *pp = part + ((size_t)(g * rep + j) * nch + c) * (HD + 2); pp[2 + d] = acc[i]; if (d == 0) { pp[0] = pm[j]; pp[1] = ps[j]; } } }
+  for (int j = 0; j < 8; j++) if (j < rep) { float *pp = part + ((size_t)(g * rep + j) * nch + c) * (HD + 2); pp[2 + tid] = acc[j]; if (tid == 0) { pp[0] = pm[j]; pp[1] = ps[j]; } }
 }
 
 // merge the chunk partials of one head and quantise the result (block = one head, HD threads, one warp per 32 dims)
@@ -328,9 +354,14 @@ class LlamaCuda : public Model {
     MvArgs a{}; a.nm = nm; a.cols = m[0].cols; a.xq = aq_[ai]; a.xs = as_[ai]; a.xsum = asum_[ai]; a.resid = resid; int tot = 0;
     for (int i = 0; i < nm; i++) { a.m[i] = m[i]; a.bias[i] = bias ? bias[i] : nullptr; a.out[i] = out ? out[i] : nullptr; a.rowstart[i] = tot; tot += m[i].rows; }
     a.rowstart[nm] = tot;
-    constexpr int WPB = 4; k_mv<WPB><<<(tot + WPB - 1) / WPB, WPB * 32, smem_for(a.cols), s>>>(a);
+    switch (wpb_) {
+      case 2: k_mv<2><<<(tot + 1) / 2, 64, smem_for(a.cols), s>>>(a); break;
+      case 4: k_mv<4><<<(tot + 3) / 4, 128, smem_for(a.cols), s>>>(a); break;
+      case 16: k_mv<16><<<(tot + 15) / 16, 512, smem_for(a.cols), s>>>(a); break;
+      default: k_mv<8><<<(tot + 7) / 8, 256, smem_for(a.cols), s>>>(a);
+    }
   }
-  void norm(cudaStream_t s, const float *w, int ai, float *yf) { k_norm_actq<<<1, 256, 0, s>>>(x_, w, d_, eps_, aq_[ai], as_[ai], asum_[ai], yf); }
+  void norm(cudaStream_t s, const float *w, int ai, float *yf) { k_norm_actq<<<1, 1024, 0, s>>>(x_, w, d_, eps_, aq_[ai], as_[ai], asum_[ai], yf); }
 
   void build_graphs() {
     const float scl = 1.f / std::sqrt((float)hd_); const int rep = nh_ / nkv_;
@@ -342,14 +373,17 @@ class LlamaCuda : public Model {
       const Layer &ly = layers_[l]; __half *kl = kc_ + (size_t)l * ctx_ * kvd_, *vl = vc_ + (size_t)l * ctx_ * kvd_;
       norm(s, ly.an, 0, nullptr);
       { DMat m[3] = {ly.wq, ly.wk, ly.wv}; const float *b[3] = {ly.bq, ly.bk, ly.bv}; float *o[3] = {q_, k_, v_}; mv(s, m, b, o, 3, 0, nullptr); }
-      k_rope_kv<<<1, 256, 0, s>>>(q_, k_, v_, cos_, sin_, ctl_, kl, vl, nh_, nkv_, hd_);
-      if (hd_ == 64) k_attn<64><<<dim3(nkv_, nch_), 128, 0, s>>>(q_, kl, vl, part_, ctl_, rep, nkv_, nch_, scl);
-      else k_attn<128><<<dim3(nkv_, nch_), 128, 0, s>>>(q_, kl, vl, part_, ctl_, rep, nkv_, nch_, scl);
+      if (hd_ == 64) k_attn<64><<<dim3(nkv_, nch_), 64, 0, s>>>(q_, k_, v_, cos_, sin_, kl, vl, part_, ctl_, rep, nkv_, nch_, scl, dbg_);
+      else k_attn<128><<<dim3(nkv_, nch_), 128, 0, s>>>(q_, k_, v_, cos_, sin_, kl, vl, part_, ctl_, rep, nkv_, nch_, scl, dbg_);
       if (hd_ == 64) k_merge<64><<<nh_, 64, 0, s>>>(part_, ctl_, nch_, aq_[0], as_[0], asum_[0]);
       else k_merge<128><<<nh_, 128, 0, s>>>(part_, ctl_, nch_, aq_[0], as_[0], asum_[0]);
       { DMat m[1] = {ly.wo}; mv(s, m, nullptr, nullptr, 1, 0, x_); }
       norm(s, ly.fn, 0, nullptr);
-      k_gateup<<<ff_ / 32, 1024, smem_for(d_), s>>>(ly.wg, ly.wu, aq_[0], as_[0], asum_[0], aq_[1], as_[1], asum_[1]);
+      switch (gu_nw_) {
+        case 8: k_gateup<8><<<ff_ / 32, 8 * 32, smem_for(d_), s>>>(ly.wg, ly.wu, aq_[0], as_[0], asum_[0], aq_[1], as_[1], asum_[1]); break;
+        case 16: k_gateup<16><<<ff_ / 32, 16 * 32, smem_for(d_), s>>>(ly.wg, ly.wu, aq_[0], as_[0], asum_[0], aq_[1], as_[1], asum_[1]); break;
+        default: k_gateup<32><<<ff_ / 32, 32 * 32, smem_for(d_), s>>>(ly.wg, ly.wu, aq_[0], as_[0], asum_[0], aq_[1], as_[1], asum_[1]);
+      }
       { DMat m[1] = {ly.wd}; mv(s, m, nullptr, nullptr, 1, 1, x_); }
     }
     cudaGraph_t ga; CK(cudaStreamEndCapture(s, &ga)); CK(cudaGraphInstantiate(&ga_, ga, nullptr, nullptr, 0)); CK(cudaGraphDestroy(ga));
@@ -359,6 +393,9 @@ class LlamaCuda : public Model {
     cudaGraph_t gb; CK(cudaStreamEndCapture(s, &gb)); CK(cudaGraphInstantiate(&gb_, gb, nullptr, nullptr, 0)); CK(cudaGraphDestroy(gb));
   }
 
+  const int wpb_ = getenv("QPACK_CUDA_WPB") ? atoi(getenv("QPACK_CUDA_WPB")) : 8;
+  const int dbg_ = getenv("QPACK_CUDA_DBG") ? atoi(getenv("QPACK_CUDA_DBG")) : 0;
+  const int gu_nw_ = getenv("QPACK_CUDA_GU") ? atoi(getenv("QPACK_CUDA_GU")) : 32;
   int d_, L_, nh_, nkv_, hd_, ff_, V_, ctx_, kvd_, qd_, nch_, pos_ = 0, slot_ = 0, pending_ = 0; float eps_;
   cudaStream_t st_ = nullptr; cudaGraphExec_t ga_ = nullptr, gb_ = nullptr;
   DMat embed_{}, head_{}; const float *fnorm_ = nullptr; std::vector<Layer> layers_; std::vector<void *> allocs_;
