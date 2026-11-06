@@ -222,7 +222,7 @@ std::unique_ptr<Model> load_model(const std::string &path, int max_ctx) {
   auto c = std::make_shared<Container>(path);
   const std::string arch = c->config()["arch"].as_str(), mt = c->config()["model_type"].as_str();
   const char *dev = getenv("QPACK_DEVICE"); const bool cuda = dev && !strcmp(dev, "cuda");
-  if (cuda && arch != "llama") throw std::runtime_error("QPACK_DEVICE=cuda: only Llama-family models are supported (arch='" + arch + "')");
+  if (cuda && arch != "llama" && arch != "gptoss") throw std::runtime_error("QPACK_DEVICE=cuda: only Llama-family and gptoss models are supported (arch='" + arch + "')");
   if (arch == "llama") {
     if (cuda) {
 #ifdef QPACK_HAVE_CUDA
@@ -232,6 +232,16 @@ std::unique_ptr<Model> load_model(const std::string &path, int max_ctx) {
 #endif
     }
     return make_llama(c, max_ctx);
+  }
+  if (arch == "gptoss") {
+    if (cuda) {
+#ifdef QPACK_HAVE_CUDA
+      return make_gptoss_cuda(c, max_ctx);
+#else
+      throw std::runtime_error("QPACK_DEVICE=cuda: this build has no CUDA support (configure with -DQPACK_CUDA=ON)");
+#endif
+    }
+    return make_gptoss(c, max_ctx);
   }
   if (arch == "lfm3") return make_lfm3(c, max_ctx);
   if (mt == "nq4") return make_nq(c, max_ctx);

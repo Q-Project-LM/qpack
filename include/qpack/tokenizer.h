@@ -1,6 +1,6 @@
 // Byte-level BPE tokenizer read from a Hugging Face tokenizer.json (Qwen2, Llama 3, SmolLM, GPT-2, N-Q, ...):
 // NFC normalizer, Split(regex) / Digits / ByteLevel pre-tokenizers, BPE merges (ignore_merges), added tokens.
-// The regex engine is a small backtracking matcher over code points with Unicode \p{L}, \p{N}, \s classes.
+// The regex engine is a small backtracking matcher over code points with Unicode \p{L} \p{Lu} \p{Ll} \p{Lt} \p{Lm} \p{Lo} \p{M} \p{N} \s classes (also negated).
 #pragma once
 #include <cstdint>
 #include <memory>
@@ -15,6 +15,8 @@ namespace qp {
 bool uni_is_letter(uint32_t cp);
 bool uni_is_number(uint32_t cp);
 bool uni_is_space(uint32_t cp);
+int uni_prop_id(const char *name);               // L Lu Ll Lt Lm Lo M N (-1: unknown)
+bool uni_has_prop(int id, uint32_t cp);
 std::vector<uint32_t> utf8_decode(const std::string &s);
 std::string utf8_encode(const std::vector<uint32_t> &cps);
 std::string nfc(const std::string &s);

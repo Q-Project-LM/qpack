@@ -12,6 +12,11 @@ namespace qp {
 ChatFormat::ChatFormat(const Json &cfg, const Tokenizer &tok) {
   const std::string tmpl = cfg["chat_template"].as_str();
   if (cfg["model_type"].as_str() == "nq4" || tok.token_id("<MODEL>") >= 0) name_ = "nq";
+  else if (cfg["chat_format"].as_str() == "harmony" || (tok.token_id("<|channel|>") >= 0 && tok.token_id("<|constrain|>") >= 0)) {
+    name_ = "harmony";
+    h_start_ = tok.token_id("<|start|>"); h_end_ = tok.token_id("<|end|>"); h_msg_ = tok.token_id("<|message|>"); h_chan_ = tok.token_id("<|channel|>");
+    h_return_ = tok.token_id("<|return|>"); h_call_ = tok.token_id("<|call|>");
+  }
   else if (cfg["chat_format"].as_str() == "chatml" || tok.token_id("<|im_start|>") >= 0) name_ = "chatml";
   else name_ = "raw";
   // templates that open with {{ bos_token }} (MiniCPM, Llama 3, ...): the model expects the BOS token in front of the conversation
@@ -30,6 +35,7 @@ ChatFormat::ChatFormat(const Json &cfg, const Tokenizer &tok) {
   const Json &eos = cfg["eos_token_id"];
   if (eos.type == Json::Array) for (auto &e : eos.arr) add((int)e.as_int()); else if (!eos.is_null()) add((int)eos.as_int());
   for (const char *t : {"<|im_end|>", "<|endoftext|>", "<|eot_id|>", "<|end_of_text|>", "<EOT>", "<eos>", "</s>"}) add(tok.token_id(t));
+  if (name_ == "harmony") { add(h_return_); add(h_call_); }   // <|end|> only closes a message (the reply goes on in the next one)
   if (name_ == "nq") { think_ = tok.token_id("<THINK>"); ethink_ = tok.token_id("<ETHINK>"); eq_ = tok.token_id("<EQ>"); }
 }
 std::string ChatFormat::display(int id, const Tokenizer &tok) const {
@@ -37,6 +43,23 @@ std::string ChatFormat::display(int id, const Tokenizer &tok) const {
   if (id == think_) return "<think>";
   if (id == ethink_) return "</think>";
   if (id == eq_) return " = ";
+  return "";
+}
+std::string ChatFormat::display_harmony(int id, const Tokenizer &tok, HarmonyState &st) const {
+  auto close = [&]() { std::string r = st.mode == 2 && st.chan == "analysis" && st.show_reasoning ? "\n</think>\n\n" : ""; st.mode = 0; st.chan.clear(); return r; };
+  if (id == h_chan_) { std::string r = close(); st.mode = 1; return r; }
+  if (id == h_msg_) {
+    if (st.mode == 2) return "";
+    st.mode = 2; return st.chan == "analysis" && st.show_reasoning ? "<think>\n" : "";
+  }
+  if (id == h_end_ || id == h_start_ || id == h_return_ || id == h_call_) return close();
+  if (tok.is_special(id)) return "";
+  const std::string p = tok.piece(id);
+  if (st.mode == 1) { st.chan += p; return ""; }
+  if (st.mode == 2) {
+    if (st.chan == "final") { st.final_text += p; return p; }
+    if (st.chan == "analysis" && st.show_reasoning) return p;
+  }
   return "";
 }
 bool ChatFormat::is_stop(int id) const { for (int s : stop_) if (s == id) return true; return false; }
@@ -47,6 +70,17 @@ std::string ChatFormat::render(const std::vector<Message> &msgs, bool gen, bool 
     o = "<bos>";
     for (auto &m : msgs) o += (m.role == "system" ? "<SYSTEM>" : m.role == "assistant" ? "<MODEL>" : "<USER>") + m.content + "<EOT>";
     if (gen) { o += "<MODEL>"; if (think) o += "<THINK>"; }
+    return o;
+  }
+  if (name_ == "harmony") {   // https://github.com/openai/harmony: system (identity, reasoning effort, channels), developer instructions, turns
+    o = std::string("<|start|>system<|message|>You are ChatGPT, a large language model trained by OpenAI.\nKnowledge cutoff: 2024-06\nCurrent date: 2025-08-05\n\nReasoning: ") +
+        (think ? "medium" : "low") + "\n\n# Valid channels: analysis, commentary, final. Channel must be included for every message.<|end|>";
+    for (auto &m : msgs) {
+      if (m.role == "system" || m.role == "developer") o += "<|start|>developer<|message|># Instructions\n\n" + m.content + "<|end|>";
+      else if (m.role == "assistant") o += "<|start|>assistant<|channel|>final<|message|>" + m.content + "<|end|>";
+      else o += "<|start|>user<|message|>" + m.content + "<|end|>";
+    }
+    if (gen) o += "<|start|>assistant";
     return o;
   }
   if (name_ == "chatml") {
@@ -145,11 +179,12 @@ GenResult Session::generate(const std::vector<int> &prompt, int max_new, Sampler
   r.finish = "length";
   if (circ_) { circ_->clear(); circ_->calls = circ_->failed = 0; }
   const int V = m_->vocab();
+  const bool harmony = harmony_filter_ && chat_->harmony(); HarmonyState hs; hs.show_reasoning = show_reasoning_;
   // one generated token: false = stop (stop token, stop string, on_text abort, max_new or context reached)
   auto emit = [&](int t, int pos_before) {   // pos_before: model position before t is fed
     if (chat_->is_stop(t)) { r.finish = "stop"; return false; }
     r.ids.push_back(t);
-    bytes += chat_->display(t, *tok_);
+    bytes += harmony ? chat_->display_harmony(t, *tok_, hs) : chat_->display(t, *tok_);
     bool stop_hit = false;
     for (auto &ss : stop_strings) { size_t f = bytes.find(ss, sent > ss.size() ? sent - ss.size() : 0); if (!ss.empty() && f != std::string::npos) { bytes.resize(f); stop_hit = true; break; } }
     // hand out only complete UTF-8 characters, holding back a possible stop-string prefix
@@ -219,7 +254,7 @@ GenResult Session::generate(const std::vector<int> &prompt, int max_new, Sampler
   }
   if (sent < bytes.size() && on_text) on_text(bytes.substr(sent));
   if (circ_) { r.circuit_calls = circ_->calls; r.circuit_failed = circ_->failed; }
-  r.raw = tok_->decode(r.ids, false);
+  r.raw = harmony ? hs.final_text : tok_->decode(r.ids, false);
   r.text = bytes; r.decode_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t1).count();
   return r;
 }
@@ -234,16 +269,27 @@ GenResult Session::chat_turn(const std::vector<Message> &msgs_in, int max_new, S
     if (msgs.size() <= first + 1) break;
     msgs.erase(msgs.begin() + first);
   }
-  return generate(ids, std::min(max_new, m_->max_ctx() - (int)ids.size()), s, on_text);
+  harmony_filter_ = true; show_reasoning_ = think;
+  GenResult r;
+  try { r = generate(ids, std::min(max_new, m_->max_ctx() - (int)ids.size()), s, on_text); } catch (...) { harmony_filter_ = false; throw; }
+  harmony_filter_ = false; return r;
 }
 
 double Session::nll(const std::vector<int> &ids, int *count) {
   m_->reset(); hist_.clear(); double tot = 0; int n = 0; const float *lg = nullptr; const int V = m_->vocab();
-  for (size_t i = 0; i + 1 < ids.size() && (int)i < m_->max_ctx(); i++) {
-    lg = m_->step(ids[i], 1); hist_.push_back(ids[i]);
-    float mx = lg[0]; for (int v = 1; v < V; v++) mx = std::max(mx, lg[v]);
-    double z = 0; for (int v = 0; v < V; v++) z += std::exp((double)lg[v] - mx);
-    tot += mx + std::log(z) - lg[ids[i + 1]]; n++;
+  const bool batched = m_->arch() == "gptoss";   // batched prompt path (expert-grouped) instead of one token at a time
+  const int N = (int)std::min<size_t>(ids.size() ? ids.size() - 1 : 0, (size_t)m_->max_ctx());
+  std::vector<float> blk; const int BS = 64; if (batched) blk.resize((size_t)BS * V);
+  for (int i0 = 0; i0 < N; i0 += batched ? BS : 1) {
+    const int nb = batched ? std::min(BS, N - i0) : 1;
+    if (batched) { m_->prefill_all(ids.data() + i0, nb, blk.data()); } else lg = m_->step(ids[i0], 1);
+    for (int b = 0; b < nb; b++) {
+      const float *l = batched ? blk.data() + (size_t)b * V : lg; const int i = i0 + b;
+      float mx = l[0]; for (int v = 1; v < V; v++) mx = std::max(mx, l[v]);
+      double z = 0; for (int v = 0; v < V; v++) z += std::exp((double)l[v] - mx);
+      tot += mx + std::log(z) - l[ids[i + 1]]; n++;
+    }
+    hist_.insert(hist_.end(), ids.begin() + i0, ids.begin() + i0 + nb);
   }
   if (count) *count = n;
   return n ? tot / n : 0;

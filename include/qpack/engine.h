@@ -44,7 +44,11 @@ class Sampler {
 
 struct Message { std::string role, content; };
 
-// Renders conversations for the model's chat format: "chatml" (Qwen, SmolLM, ...) or "nq" (N-Q control tokens).
+// What the harmony format (gpt-oss) shows of a generated message stream: only the "final" channel, or also the "analysis" channel
+// (reasoning) wrapped in <think>...</think>; commentary (tool calls) is hidden. `final_text` collects the final channel.
+struct HarmonyState { int mode = 0; std::string chan, final_text; bool show_reasoning = false; };
+
+// Renders conversations for the model's chat format: "chatml" (Qwen, SmolLM, ...), "nq" (N-Q control tokens) or "harmony" (gpt-oss).
 class ChatFormat {
  public:
   ChatFormat(const Json &cfg, const Tokenizer &tok);
@@ -54,7 +58,10 @@ class ChatFormat {
   bool is_stop(int id) const;
   // text shown for a generated token: N-Q control tokens become "<think>", "</think>", " = " (circuit result), ""
   std::string display(int id, const Tokenizer &tok) const;
+  bool harmony() const { return name_ == "harmony"; }
+  std::string display_harmony(int id, const Tokenizer &tok, HarmonyState &st) const;
  private:
+  int h_start_ = -1, h_end_ = -1, h_msg_ = -1, h_chan_ = -1, h_return_ = -1, h_call_ = -1;
   std::string name_, default_system_, bos_, think_off_, think_on_; std::vector<int> stop_;
   int think_ = -1, ethink_ = -1, eq_ = -1;
 };
@@ -89,6 +96,7 @@ class Session {
  private:
   const float *eval(const std::vector<int> &ids, int *reused);
   std::unique_ptr<Model> m_; std::unique_ptr<Tokenizer> tok_; std::unique_ptr<ChatFormat> chat_; std::unique_ptr<CircuitExecutor> circ_;
+  bool harmony_filter_ = false, show_reasoning_ = false;   // chat turns of a harmony model: show only the final channel (see HarmonyState)
   std::vector<int> hist_;   // tokens currently in the model state
   std::vector<int> snap_ids_; std::vector<uint8_t> snap_;   // recurrent models: state after a previous prompt minus its last token
   std::vector<int> propose(const std::vector<int> &seq, int k);

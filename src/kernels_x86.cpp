@@ -210,6 +210,78 @@ void mm_q1(const uint8_t *Q, const uint16_t *S, const int16_t *XQ, const float *
   for (int r = r0; r < r1; r++)
     for (int b = 0; b < B; b += 4) row_q1_multi(Q, S, XQ + (int64_t)b * ldq, ldq, BS + (int64_t)b * nb, nb, Y + (int64_t)b * ldy, ldy, r, std::min(4, B - b), cols);
 }
+// q8g: int8 weights, fp16 scale per 32 columns; per group an exact int32 dot product, then one float FMA with scale x activation
+// block scale. All entry points go through row_q8g_nt (bit-identical).
+template <int NT>
+static inline void row_q8g_nt(const int8_t *q, const uint16_t *s, const int16_t *XQ, int ldq, const float *BS, int nbs, int cols, float *out) {
+  const int G = cols / 32; __m256 a0[NT], a1[NT]; for (int j = 0; j < NT; j++) a0[j] = a1[j] = _mm256_setzero_ps();
+  for (int k = 0; k < G; k++) {
+    const __m256i w0 = _mm256_cvtepi8_epi16(_mm_loadu_si128((const __m128i *)(q + 32 * k))), w1 = _mm256_cvtepi8_epi16(_mm_loadu_si128((const __m128i *)(q + 32 * k + 16)));
+    const float sc = _cvtsh_ss(s[k]);
+    for (int j = 0; j < NT; j++) {
+      const int16_t *x = XQ + (int64_t)j * ldq + 32 * k;
+      const __m256i d = _mm256_add_epi32(_mm256_madd_epi16(w0, _mm256_loadu_si256((const __m256i *)x)), _mm256_madd_epi16(w1, _mm256_loadu_si256((const __m256i *)(x + 16))));
+      __m256 &a = (k & 1) ? a1[j] : a0[j];
+      a = _mm256_fmadd_ps(_mm256_cvtepi32_ps(d), _mm256_set1_ps(sc * BS[(int64_t)j * nbs + (k >> 2)]), a);
+    }
+  }
+  for (int j = 0; j < NT; j++) out[j] = hsum256(_mm256_add_ps(a0[j], a1[j]));
+}
+void rows_q8g(const int8_t *Q, const uint16_t *S, const int16_t *xq, const float *bs, float *y, int r0, int r1, int cols) {
+  for (int r = r0; r < r1; r++) row_q8g_nt<1>(Q + (int64_t)r * cols, S + (int64_t)r * (cols / 32), xq, 0, bs, 0, cols, y + r);
+}
+void row_q8g_multi(const int8_t *Q, const uint16_t *S, const int16_t *XQ, int ldq, const float *BS, int nbs, float *Y, int ldy, int r, int nt, int cols) {
+  const int8_t *q = Q + (int64_t)r * cols; const uint16_t *s = S + (int64_t)r * (cols / 32); float o[4];
+  switch (nt) {
+    case 1: row_q8g_nt<1>(q, s, XQ, ldq, BS, nbs, cols, o); break;
+    case 2: row_q8g_nt<2>(q, s, XQ, ldq, BS, nbs, cols, o); break;
+    case 3: row_q8g_nt<3>(q, s, XQ, ldq, BS, nbs, cols, o); break;
+    default: row_q8g_nt<4>(q, s, XQ, ldq, BS, nbs, cols, o); break;
+  }
+  for (int j = 0; j < nt; j++) Y[(int64_t)j * ldy + r] = o[j];
+}
+void mm_q8g(const int8_t *Q, const uint16_t *S, const int16_t *XQ, const float *BS, int ldq, int nb, int B, float *Y, int ldy, int r0, int r1, int cols) {
+  for (int r = r0; r < r1; r++)
+    for (int b = 0; b < B; b += 4) row_q8g_multi(Q, S, XQ + (int64_t)b * ldq, ldq, BS + (int64_t)b * nb, nb, Y + (int64_t)b * ldy, ldy, r, std::min(4, B - b), cols);
+}
+// mxfp4: see kernels_impl.h. The 32 nibbles of a group are looked up with one pshufb each (lut = 2 x E2M1 value as int8),
+// widened to int16 and multiplied by the activations like q4; per group one float FMA with 2^(e - 128) x activation block scale.
+// Every mxfp4 entry point goes through row_mx4_nt, so rows / multi / mm results are bit-identical.
+template <int NT>
+static inline void row_mx4_nt(const uint8_t *q, const uint8_t *s, const int16_t *XQ, int ldq, const float *BS, int nbs, int cols, float *out) {
+  const int G = cols / 32; const __m128i lut = _mm_load_si128((const __m128i *)kMx4Lut2), m = _mm_set1_epi8(0x0F);
+  __m256 a0[NT], a1[NT]; for (int j = 0; j < NT; j++) a0[j] = a1[j] = _mm256_setzero_ps();
+  for (int k = 0; k < G; k++) {
+    const __m128i b = _mm_loadu_si128((const __m128i *)(q + 16 * k));
+    const __m256i lo = _mm256_cvtepi8_epi16(_mm_shuffle_epi8(lut, _mm_and_si128(b, m))), hi = _mm256_cvtepi8_epi16(_mm_shuffle_epi8(lut, _mm_and_si128(_mm_srli_epi16(b, 4), m)));
+    const float p2 = mx4_scale(s[k]);
+    for (int j = 0; j < NT; j++) {
+      const int16_t *x = XQ + (int64_t)j * ldq + 32 * k;
+      const __m256i d = _mm256_add_epi32(_mm256_madd_epi16(lo, _mm256_loadu_si256((const __m256i *)x)), _mm256_madd_epi16(hi, _mm256_loadu_si256((const __m256i *)(x + 16))));
+      __m256 &a = (k & 1) ? a1[j] : a0[j];
+      a = _mm256_fmadd_ps(_mm256_cvtepi32_ps(d), _mm256_set1_ps(p2 * BS[(int64_t)j * nbs + (k >> 2)]), a);
+    }
+  }
+  for (int j = 0; j < NT; j++) out[j] = hsum256(_mm256_add_ps(a0[j], a1[j]));
+}
+void rows_mx4(const uint8_t *Q, const uint8_t *S, const int16_t *xq, const float *bs, float *y, int r0, int r1, int cols) {
+  const int G = cols / 32;
+  for (int r = r0; r < r1; r++) row_mx4_nt<1>(Q + (int64_t)r * G * 16, S + (int64_t)r * G, xq, 0, bs, 0, cols, y + r);
+}
+void row_mx4_multi(const uint8_t *Q, const uint8_t *S, const int16_t *XQ, int ldq, const float *BS, int nbs, float *Y, int ldy, int r, int nt, int cols) {
+  const int G = cols / 32; const uint8_t *q = Q + (int64_t)r * G * 16, *s = S + (int64_t)r * G; float o[4];
+  switch (nt) {
+    case 1: row_mx4_nt<1>(q, s, XQ, ldq, BS, nbs, cols, o); break;
+    case 2: row_mx4_nt<2>(q, s, XQ, ldq, BS, nbs, cols, o); break;
+    case 3: row_mx4_nt<3>(q, s, XQ, ldq, BS, nbs, cols, o); break;
+    default: row_mx4_nt<4>(q, s, XQ, ldq, BS, nbs, cols, o); break;
+  }
+  for (int j = 0; j < nt; j++) Y[(int64_t)j * ldy + r] = o[j];
+}
+void mm_mx4(const uint8_t *Q, const uint8_t *S, const int16_t *XQ, const float *BS, int ldq, int nb, int B, float *Y, int ldy, int r0, int r1, int cols) {
+  for (int r = r0; r < r1; r++)
+    for (int b = 0; b < B; b += 4) row_mx4_multi(Q, S, XQ + (int64_t)b * ldq, ldq, BS + (int64_t)b * nb, nb, Y + (int64_t)b * ldy, ldy, r, std::min(4, B - b), cols);
+}
 // ---- batched products (prompt): rows are split over threads, every thread runs its rows against all B vectors, four
 // vectors per pass so each loaded weight vector feeds four accumulators
 void mm_q8(const int8_t *Q, const float *scale, const int16_t *XQ, const float *BS, int ldq, int nb, int B, float *Y, int ldy, int r0, int r1, int cols) {
