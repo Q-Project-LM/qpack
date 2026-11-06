@@ -84,7 +84,7 @@ namespace {
 struct Node {
   enum T { Char, Class, Any, Seq, Alt, Rep, NegLook } t = Seq;
   uint32_t ch = 0; bool icase = false;
-  struct Item { int kind; uint32_t a, b; };   // kind: 0 range, 1 \p{L}, 2 \p{N}, 3 \s, 4 \S, 5 \d, 6 \w, 7 \P{L}, 8 \P{N}
+  struct Item { int kind; uint32_t a, b; };   // kind: 0 range, 1 \p{..} (a = property id, b = negated), 3 \s, 4 \S, 5 \d, 6 \w
   std::vector<Item> items; bool neg = false;
   std::vector<int> kids; int mn = 0, mx = 0; bool greedy = true;
 };
@@ -103,8 +103,8 @@ struct Regex::Impl {
     uint32_t c = p[i++]; Node::Item it{0, 0, 0};
     if (c == 'p' || c == 'P') {
       std::string name; if (at(i) == '{') { i++; while (!eof() && p[i] != '}') name += (char)p[i++]; i++; } else name = (char)p[i++];
-      if (name == "L") it.kind = c == 'P' ? 7 : 1; else if (name == "N") it.kind = c == 'P' ? 8 : 2; else fail("unsupported \\p{" + name + "}");
-      return it;
+      int id = uni_prop_id(name.c_str()); if (id < 0) fail("unsupported \\p{" + name + "}");
+      it.kind = 1; it.a = (uint32_t)id; it.b = c == 'P'; return it;
     }
     if (c == 's') it.kind = 3; else if (c == 'S') it.kind = 4; else if (c == 'd') it.kind = 5; else if (c == 'w') it.kind = 6;
     else it.a = it.b = esc_char(c);
@@ -173,13 +173,11 @@ struct Regex::Impl {
   static bool item_has(const Node::Item &it, uint32_t c) {
     switch (it.kind) {
       case 0: return c >= it.a && c <= it.b;
-      case 1: return uni_is_letter(c);
-      case 2: case 5: return uni_is_number(c);
+      case 1: return uni_has_prop((int)it.a, c) != (it.b != 0);
+      case 5: return uni_is_number(c);
       case 3: return uni_is_space(c);
       case 4: return !uni_is_space(c);
       case 6: return uni_is_letter(c) || uni_is_number(c) || c == '_';
-      case 7: return !uni_is_letter(c);
-      case 8: return !uni_is_number(c);
     }
     return false;
   }
@@ -195,7 +193,7 @@ struct Regex::Impl {
     switch (c.t) {
       case Node::Class: return cls(c, ch);
       case Node::Any: return ch != '\n';
-      case Node::Char: return ch == c.ch || (c.icase && lower(ch) == lower(c.ch));
+      case Node::Char: return ch == c.ch || (c.icase && (lower(ch) == lower(c.ch) || (ch == 0x17F && lower(c.ch) == 's')));   // (?i) also folds U+017F to s
       default: return false;
     }
   }
@@ -357,9 +355,16 @@ std::vector<int> Tokenizer::encode(const std::string &text) const {
     for (auto &piece : pretokenize(nfc_ ? nfc(chunk) : chunk)) { std::string mapped; for (unsigned char c : piece) mapped += b2c_[c]; bpe(mapped, out); }
   };
   size_t pos = 0;
-  while (pos < text.size()) {   // added tokens are matched in the raw text first: earliest position, longest at a tie
+  // added tokens are matched in the raw text first: earliest position, longest at a tie. next[i] caches the first
+  // occurrence of added_sorted_[i] at or after pos, so each token is searched for once per occurrence, not once per match.
+  std::vector<size_t> next(added_sorted_.size(), 0); std::vector<char> done(added_sorted_.size(), 0);
+  while (pos < text.size()) {
     size_t best = std::string::npos; const std::string *bt = nullptr;
-    for (auto &t : added_sorted_) { if (t.empty()) continue; size_t f = text.find(t, pos); if (f < best) { best = f; bt = &t; } }
+    for (size_t i = 0; i < added_sorted_.size(); i++) {
+      if (added_sorted_[i].empty() || done[i]) continue;
+      if (next[i] < pos || next[i] == 0) { next[i] = text.find(added_sorted_[i], pos); if (next[i] == std::string::npos) { done[i] = 1; continue; } }
+      if (next[i] < best) { best = next[i]; bt = &added_sorted_[i]; }
+    }
     if (!bt) { plain(text.substr(pos)); break; }
     plain(text.substr(pos, best - pos)); out.push_back(added_.at(*bt)); pos = best + bt->size();
   }
