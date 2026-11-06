@@ -4,6 +4,7 @@
 //   Model      — one decode step at a time: Llama family (Llama, Qwen2, Mistral, SmolLM) and N-Q (Gated DeltaNet).
 #pragma once
 #include <cstdint>
+#include <cstdio>
 #include <algorithm>
 #include <functional>
 #include <memory>
@@ -158,6 +159,7 @@ class Model {
 std::unique_ptr<Model> load_model(const std::string &path, int max_ctx = 0);
 std::unique_ptr<Model> make_llama(std::shared_ptr<Container> c, int max_ctx);
 std::unique_ptr<Model> make_llama_cuda(std::shared_ptr<Container> c, int max_ctx);   // only with -DQPACK_CUDA=ON; selected by QPACK_DEVICE=cuda
+void cuda_matvec_bench(FILE *out);   // CUDA build only: q8 / q4 / q1 matvec bandwidth on Qwen2.5-0.5B shapes
 std::unique_ptr<Model> make_lfm3(std::shared_ptr<Container> c, int max_ctx);
 std::unique_ptr<Model> make_nq(std::shared_ptr<Container> c, int max_ctx);
 

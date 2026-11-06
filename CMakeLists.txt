@@ -62,8 +62,10 @@ foreach(tool qpack-cli qpack-server qpack-bench qpack-quantize qpack-perplexity)
 endforeach()
 
 if(QPACK_CUDA)
-  add_executable(qpack-cudacheck tools/qpack-cudacheck.cpp)
-  target_link_libraries(qpack-cudacheck PRIVATE qpack)
+  foreach(tool qpack-cudacheck qpack-cudamv)
+    add_executable(${tool} tools/${tool}.cpp)
+    target_link_libraries(${tool} PRIVATE qpack)
+  endforeach()
 endif()
 
 add_executable(test_tokenizer tests/test_tokenizer.cpp)
