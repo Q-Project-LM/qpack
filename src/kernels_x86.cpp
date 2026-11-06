@@ -4,6 +4,7 @@
 #if defined(__x86_64__) || defined(_M_X64)
 #include <immintrin.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <vector>
@@ -158,6 +159,56 @@ void row_q4_multi(const uint8_t *Q, const uint16_t *S, const int16_t *XQ, int ld
     }
   }
   for (int j = 0; j < nt; j++) Y[(int64_t)j * ldy + r] = hsum256(_mm256_add_ps(a0[j], a1[j]));
+}
+// q1: sign bits, 128-column groups (16 bytes, bit c of the group = column c, LSB first, 1 => +1) and one fp16 scale per
+// group; W = (2b - 1) * scale. A group's integer dot product is sum(x * (+-1)) = 2 * sum(x[bit = 1]) - sum(x): the 128 bits are
+// expanded to +-1 int16 lanes (broadcast, AND with the lane's bit, compare, OR 1) and multiplied with madd. Activation blocks
+// (QB = 128) coincide with the groups. The last partial group has zero bits padded and its activations read as 0.
+// Every q1 entry point (rows_q1, row_q1_multi, mm_q1) goes through row_q1_nt, so the results are bit-identical.
+static inline void expand_q1(const uint8_t *p, __m256i w[8]) {
+  const __m256i sel = _mm256_setr_epi16(1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, (int16_t)0x8000), zero = _mm256_setzero_si256(), one = _mm256_set1_epi16(1);
+  for (int i = 0; i < 8; i++) {
+    uint16_t v; memcpy(&v, p + 2 * i, 2);
+    w[i] = _mm256_or_si256(_mm256_cmpeq_epi16(_mm256_and_si256(_mm256_set1_epi16((int16_t)v), sel), zero), one);
+  }
+}
+template <int NT>
+static inline void row_q1_nt(const uint8_t *q, const uint16_t *s, const int16_t *XQ, int ldq, const float *BS, int nbs, int cols, float *out) {
+  const int G = (cols + 127) / 128;
+  __m256 acc[NT]; for (int j = 0; j < NT; j++) acc[j] = _mm256_setzero_ps();
+  alignas(32) int16_t pad[128];
+  for (int g = 0; g < G; g++) {
+    __m256i w[8]; expand_q1(q + 16 * g, w); const float sc = _cvtsh_ss(s[g]); const int n = std::min(128, cols - 128 * g);
+    for (int j = 0; j < NT; j++) {
+      const int16_t *x = XQ + (int64_t)j * ldq + 128 * g;
+      if (n < 128) { memset(pad, 0, sizeof pad); memcpy(pad, x, 2 * (size_t)n); x = pad; }
+      __m256i d = _mm256_madd_epi16(w[0], _mm256_loadu_si256((const __m256i *)x));
+      for (int i = 1; i < 8; i++) d = _mm256_add_epi32(d, _mm256_madd_epi16(w[i], _mm256_loadu_si256((const __m256i *)(x + 16 * i))));
+      acc[j] = _mm256_fmadd_ps(_mm256_cvtepi32_ps(d), _mm256_set1_ps(sc * BS[(int64_t)j * nbs + g]), acc[j]);
+    }
+  }
+  for (int j = 0; j < NT; j++) out[j] = hsum256(acc[j]);
+}
+static inline void row_q1_any(const uint8_t *q, const uint16_t *s, const int16_t *XQ, int ldq, const float *BS, int nbs, int cols, int nt, float *out) {
+  switch (nt) {
+    case 1: row_q1_nt<1>(q, s, XQ, ldq, BS, nbs, cols, out); break;
+    case 2: row_q1_nt<2>(q, s, XQ, ldq, BS, nbs, cols, out); break;
+    case 3: row_q1_nt<3>(q, s, XQ, ldq, BS, nbs, cols, out); break;
+    default: row_q1_nt<4>(q, s, XQ, ldq, BS, nbs, cols, out); break;
+  }
+}
+void rows_q1(const uint8_t *Q, const uint16_t *S, const int16_t *xq, const float *bs, float *y, int r0, int r1, int cols) {
+  const int G = (cols + 127) / 128;
+  for (int r = r0; r < r1; r++) row_q1_nt<1>(Q + (int64_t)r * G * 16, S + (int64_t)r * G, xq, 0, bs, 0, cols, y + r);
+}
+void row_q1_multi(const uint8_t *Q, const uint16_t *S, const int16_t *XQ, int ldq, const float *BS, int nbs, float *Y, int ldy, int r, int nt, int cols) {
+  const int G = (cols + 127) / 128; float o[4];
+  row_q1_any(Q + (int64_t)r * G * 16, S + (int64_t)r * G, XQ, ldq, BS, nbs, cols, nt, o);
+  for (int j = 0; j < nt; j++) Y[(int64_t)j * ldy + r] = o[j];
+}
+void mm_q1(const uint8_t *Q, const uint16_t *S, const int16_t *XQ, const float *BS, int ldq, int nb, int B, float *Y, int ldy, int r0, int r1, int cols) {
+  for (int r = r0; r < r1; r++)
+    for (int b = 0; b < B; b += 4) row_q1_multi(Q, S, XQ + (int64_t)b * ldq, ldq, BS + (int64_t)b * nb, nb, Y + (int64_t)b * ldy, ldy, r, std::min(4, B - b), cols);
 }
 // ---- batched products (prompt): rows are split over threads, every thread runs its rows against all B vectors, four
 // vectors per pass so each loaded weight vector feeds four accumulators

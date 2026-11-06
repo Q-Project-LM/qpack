@@ -1,5 +1,6 @@
 // Row kernels implemented per architecture (kernels_x86.cpp / kernels_neon.cpp), called by the dispatch in kernels.cpp.
-// Weights are int8 (q8: one float scale per row) or 4-bit groups of 32 (q4: one fp16 scale per group); activations are
+// Weights are int8 (q8: one float scale per row), 4-bit groups of 32 (q4: one fp16 scale per group) or sign bits in groups of
+// 128 (q1: one fp16 scale per group, pad columns of a partial last group read as 0); activations are
 // int16 with one float scale per QB columns. y = W[r0..r1) x for the *rows_* functions; the *_multi functions compute one
 // row against nt <= 4 vectors with, per vector, exactly the arithmetic of the matching rows_* function; mm_* are the tiled
 // prompt kernels (Y[b * ldy + r], B vectors).
@@ -25,6 +26,9 @@ void rows_f32(const float *W, const float *x, float *y, int r0, int r1, int cols
 void rows_f16(const uint16_t *W, const float *x, float *y, int r0, int r1, int cols);
 void rows_q8(const int8_t *Q, const float *scale, const int16_t *xq, const float *bs, float *y, int r0, int r1, int cols);
 void rows_q4(const uint8_t *Q, const uint16_t *S, const int16_t *xq, const float *bs, float *y, int r0, int r1, int cols);
+void rows_q1(const uint8_t *Q, const uint16_t *S, const int16_t *xq, const float *bs, float *y, int r0, int r1, int cols);
+void row_q1_multi(const uint8_t *Q, const uint16_t *S, const int16_t *XQ, int ldq, const float *BS, int nbs, float *Y, int ldy, int r, int nt, int cols);
+void mm_q1(const uint8_t *Q, const uint16_t *S, const int16_t *XQ, const float *BS, int ldq, int nb, int B, float *Y, int ldy, int r0, int r1, int cols);
 void row_q8_multi(const int8_t *Q, const float *scale, const int16_t *XQ, int ldq, const float *BS, int nbs, float *Y, int ldy, int r, int nt, int cols);
 void row_q4_multi(const uint8_t *Q, const uint16_t *S, const int16_t *XQ, int ldq, const float *BS, int nbs, float *Y, int ldy, int r, int nt, int cols);
 void mm_q8(const int8_t *Q, const float *scale, const int16_t *XQ, const float *BS, int ldq, int nb, int B, float *Y, int ldy, int r0, int r1, int cols);

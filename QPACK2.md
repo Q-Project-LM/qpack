@@ -15,6 +15,7 @@ blobs   each aligned to 64 bytes
 |---|---|---|
 | `q8` (new) | `wNNNN.q8` int8 `[rows, cols]` row-major + `wNNNN.scale` float32 `[rows]` | `W[r, c] = q[r, c] * scale[r]`, `q ∈ [-127, 127]`, `scale[r] = max_c |W[r, c]| / 127` |
 | `q4` | `wNNNN.q4` uint8 `[rows, cols / 2]` + `wNNNN.scale` fp16 `[rows, cols / 32]`; manifest `"group": 32` | groups of 32 columns, 16 bytes each: byte `j` holds column `j` (low nibble) and column `j + 16` (high nibble) as `q + 8`, `q ∈ [-8, 7]`; `W[r, 32g + c] = q * scale[r, g]`. Requires `cols % 32 == 0`. Written by `qpack-quantize` |
+| `q1` | `wNNNN.q1` uint8 `[rows, ceil(cols / 128) * 16]` + `wNNNN.scale` fp16 `[rows, ceil(cols / 128)]`; manifest `"group": 128` | sign bits in groups of 128 columns, 16 bytes each: bit `c` (LSB first) of group `g` is column `128g + c`, 1 = `+1`, 0 = `-1`; `W[r, 128g + c] = (2b - 1) * scale[r, g]`. `cols` may be any value: the last partial group is padded with 0 bits and the engine reads activations beyond `cols` as 0. Dot product per group = `scale * (2 * sum(x[bit = 1]) - sum(x))`. 1.125 bits/weight. Written by `qpack-quantize --type q1|q1m` (MLP matrices; scale = mean `|w|`, importance weighted with `--calib`) |
 | `f16` / `f32` | `wNNNN.f16` / `.f32` | dense tensors (1-D tensors — norms, decay parameters — are always f32) |
 | `i64` | `wNNNN.i64` | integer buffers (n-gram hash table sizes, offsets, multipliers): must be exact |
 | `tern5`, `bits` | as in QPACK1 | ternary weights, frozen fingerprints (Q-architecture checkpoints) |
@@ -56,3 +57,6 @@ model = NQ4ForCausalLM.from_qpack("model.q8.qpack")
 
 `python -m nq.scripts.export_hf --ckpt runs/<run>/final.pt --out <folder> --qpack2 1` writes `model.q8.qpack` next to
 `model.qpack`. In the browser: `nq-runtime/nq_model.js` (`loadNQ`, `NQ4JS.attachKernel`) reads both formats.
+
+
+3-D tensors: a `q8` / `q4` / `q1` tensor with shape `[E, R, C]` (stacked experts) is stored as `E * R` rows of `C` columns, i.e. the blobs of the 2-D tensor `[E * R, C]`; `libqpack` exposes it as `[E * R, C]` (`Tensor::orig_shape` keeps `[E, R, C]`). `qpack-quantize` quantises float 3-D tensors this way.

@@ -11,6 +11,10 @@ Contents: manifest.json, config.json, generation_config.json, tokenizer.json, se
                int4    -> <id>.q4 + <id>.scale (groups of 32 columns: 16 bytes, byte j = column j in the low nibble and
                           column j+16 in the high one, stored as q+8, q in [-8, 7]; fp16 scale per group; written by
                           the C++ tool qpack-quantize)
+               1-bit   -> <id>.q1 + <id>.scale (sign bits, groups of 128 columns: 16 bytes per group, bit c of the group = column c
+                          (LSB first), 1 => +1, 0 => -1; fp16 scale per group; W = (2b-1)*scale; the last partial group is
+                          padded with 0 bits; manifest "group": 128; written by qpack-quantize --type q1)
+               [E, R, C] tensors of any of these kinds are rows [E*R] x cols [C]
   1-D float tensors    -> <id>.f32    (norms, decay params, unigram prior: tiny, kept exact)
   everything else      -> <id>.f16 (default) or .f32 (--dense f32)
 Which projections are ternary is read from the model itself (Linear modules with .ternary=True), so the same packer covers
@@ -49,8 +53,8 @@ def write_container(path, blobs, magic=None):
         if len(n.encode()) > 55: raise ValueError("blob name too long: " + n)
         ent.append((n, off, len(blobs[n]))); off = (off + len(blobs[n]) + ALIGN - 1) // ALIGN * ALIGN
     with open(path, "wb") as o:
-        if magic is None:   # QPACK2 as soon as the container holds int8 tensors, QPACK1 otherwise
-            magic = MAGIC2 if any(n.endswith(".q8") for n in names) else MAGIC
+        if magic is None:   # QPACK2 as soon as the container holds int8 / int4 / 1-bit tensors, QPACK1 otherwise
+            magic = MAGIC2 if any(n.endswith((".q8", ".q4", ".q1")) for n in names) else MAGIC
         o.write(magic + struct.pack("<II", len(names), 0))
         for n, of, ln in ent: o.write(n.encode().ljust(56, b"\0") + struct.pack("<QQ", of, ln))
         for n, of, ln in ent:
@@ -85,9 +89,23 @@ def quantize_q8(w):
     return q, scale.astype(np.float32)
 
 
+def _rc(shape):
+    """(rows, cols) of a quantised tensor: [R, C] -> (R, C); [E, R, C] -> (E*R, C)"""
+    return int(np.prod(shape[:-1])), int(shape[-1])
+
+
+def dequant_q1(data, scale, shape):
+    """q1 blobs (see the module docstring) -> float32 array of `shape` ([rows, cols] or [E, R, C]); any cols (partial last group)."""
+    rows, cols = _rc(shape); G = (cols + 127) // 128
+    bits = np.unpackbits(np.frombuffer(data, dtype=np.uint8).reshape(rows, G * 16), axis=1, bitorder="little").reshape(rows, G * 128)
+    s = np.frombuffer(scale, dtype=np.float16).astype(np.float32).reshape(rows, G)
+    out = (bits.astype(np.float32) * 2 - 1) * np.repeat(s, 128, axis=1)
+    return np.ascontiguousarray(out[:, :cols].reshape(shape))
+
+
 def dequant_q4(data, scale, shape):
     """q4 blobs (see the module docstring) -> float32 array of `shape` [rows, cols], cols a multiple of 32."""
-    rows, cols = shape[0], int(np.prod(shape[1:]))
+    rows, cols = _rc(shape)
     b = np.frombuffer(data, dtype=np.uint8).reshape(rows, cols // 32, 16)
     q = np.concatenate([(b & 15).astype(np.int8) - 8, (b >> 4).astype(np.int8) - 8], axis=2).astype(np.float32)   # [rows, groups, 32]
     s = np.frombuffer(scale, dtype=np.float16).astype(np.float32).reshape(rows, cols // 32, 1)
@@ -151,11 +169,13 @@ def load_state(path):
         if e["kind"] == "i64":
             state[e["name"]] = torch.from_numpy(np.frombuffer(c.blob(e["blob"]), dtype=np.int64).reshape(shp).copy()); continue
         if e["kind"] == "q8":
-            q = np.frombuffer(c.blob(e["blob"]), dtype=np.int8).reshape(shp[0], -1).astype(np.float32)
+            q = np.frombuffer(c.blob(e["blob"]), dtype=np.int8).reshape(_rc(shp)[0], -1).astype(np.float32)
             arr = (q * np.frombuffer(c.blob(e["scale"]), dtype=np.float32)[:, None]).reshape(shp)
             state[e["name"]] = torch.from_numpy(np.ascontiguousarray(arr)); continue
         if e["kind"] == "q4":
             state[e["name"]] = torch.from_numpy(dequant_q4(c.blob(e["blob"]), c.blob(e["scale"]), shp)); continue
+        if e["kind"] == "q1":
+            state[e["name"]] = torch.from_numpy(dequant_q1(c.blob(e["blob"]), c.blob(e["scale"]), shp)); continue
         if e["kind"] == "tern5":
             t = unpack_tern5(c.blob(e["blob"]), n).reshape(shp).astype(np.float32); alpha = np.frombuffer(c.blob(e["alpha"]), dtype=np.float32).reshape(-1, 1)
             f = np.maximum((t != 0).mean(1, keepdims=True), 1e-12); arr = np.where(t != 0, t * (alpha / f), 0.0).astype(np.float32)

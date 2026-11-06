@@ -3,6 +3,7 @@
 #if defined(__aarch64__) || defined(_M_ARM64)
 #include <arm_neon.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <functional>
@@ -274,6 +275,29 @@ void mm_f16(const uint16_t *w, const float *X, int ldx, int B, float *Y, int ldy
   mm_float([&](int r, int c) { return ld_f16(w + (int64_t)r * cols + c); }, X, ldx, B, Y, ldy, r0, r1, cols, [&](int r, int c) { return f16_to_f32(w[(int64_t)r * cols + c]); });
 }
 
+// q1: sign bits in groups of 128 columns + one fp16 scale per group (see QPACK2.md). Portable integer code (no NEON dot
+// product): the same arithmetic as kernels_x86.cpp -- the exact int32 group sum 2 * sum(x[bit = 1]) - sum(x), then one float
+// FMA per group in group order -- and all three entry points share row_q1, so they are bit-identical to each other.
+static void row_q1(const uint8_t *q, const uint16_t *s, const int16_t *x, const float *bs, int cols, float *out) {
+  const int G = (cols + 127) / 128; float acc = 0;
+  for (int g = 0; g < G; g++) {
+    const int n = std::min(128, cols - 128 * g); int32_t d = 0;
+    for (int c = 0; c < n; c++) { const int xv = xval(x, cols, 128 * g + c); d += ((q[16 * g + (c >> 3)] >> (c & 7)) & 1) ? xv : -xv; }
+    acc = std::fmaf((float)d, f16_to_f32(s[g]) * bs[g], acc);
+  }
+  *out = acc;
+}
+void rows_q1(const uint8_t *Q, const uint16_t *S, const int16_t *xq, const float *bs, float *y, int r0, int r1, int cols) {
+  const int G = (cols + 127) / 128;
+  for (int r = r0; r < r1; r++) row_q1(Q + (int64_t)r * G * 16, S + (int64_t)r * G, xq, bs, cols, y + r);
+}
+void row_q1_multi(const uint8_t *Q, const uint16_t *S, const int16_t *XQ, int ldq, const float *BS, int nbs, float *Y, int ldy, int r, int nt, int cols) {
+  const int G = (cols + 127) / 128;
+  for (int j = 0; j < nt; j++) row_q1(Q + (int64_t)r * G * 16, S + (int64_t)r * G, XQ + (int64_t)j * ldq, BS + (int64_t)j * nbs, cols, Y + (int64_t)j * ldy + r);
+}
+void mm_q1(const uint8_t *Q, const uint16_t *S, const int16_t *XQ, const float *BS, int ldq, int nb, int B, float *Y, int ldy, int r0, int r1, int cols) {
+  for (int r = r0; r < r1; r++) row_q1_multi(Q, S, XQ, ldq, BS, nb, Y, ldy, r, B, cols);
+}
 }  // namespace impl
 
 // ---- elementwise

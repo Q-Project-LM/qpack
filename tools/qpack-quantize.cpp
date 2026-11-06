@@ -2,7 +2,9 @@
 // or q8. Embedding and output head stay q8 (they hurt most at 4 bits), as do matrices whose width is not a multiple
 // of 32. The q4 scale of every group is picked by minimum squared error over a grid of candidates plus a least-squares
 // refit. The self-test is recomputed on the dequantised model, so it checks the q4 kernels, not the rounding.
-// usage: qpack-quantize in.qpack out.qpack [--type q4|q4m|q8] [--keep-q8 name,name,...] [-t threads]
+// q1 / q1m: MLP matrices become 1-bit (sign bits, group 128 + fp16 scale = mean |w|, importance weighted with --calib), the rest
+// q8 or q4 (--q1-attn). 3-D [E, R, C] tensors (stacked experts) are quantised as [E * R, C].
+// usage: qpack-quantize in.qpack out.qpack [--type q4|q4m|q8|q1|q1m] [--q1-attn q8|q4] [--keep-q8 name,name,...] [-t threads]
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -70,7 +72,19 @@ bool more_bits(const std::string &name, int n_layers, bool last_half) {
   if (last_half) return i >= n_layers / 2;
   return i < n_layers / 8 || i >= 7 * n_layers / 8 || (i - n_layers / 8) % 3 == 2;
 }
-const char *kUsage = "usage: qpack-quantize in.qpack out.qpack [--type q4|q4m|q8] [--keep-q8 name,...] [--q4-head] [--q4m-last-half] [--calib text.txt [--gptq [--act-order]]] [--calib-tokens 4096] [-t threads]\n";
+// MLP / expert matrices (the ones --type q1 binarises)
+bool is_mlp(const std::string &n) {
+  for (const char *k : {"w_gate", "w_up", "w_down", "ffn.", "mlp", "expert"}) if (n.find(k) != std::string::npos) return true;
+  return false;
+}
+// one q1 group (n <= 128 valid columns): sign bits (1 => +1; padding bits 0) and the scale minimising sum imp (w - s sign(w))^2,
+// s = sum imp |w| / sum imp (plain mean |w| for imp = 1)
+void q1_group(const float *w, const float *imp, int n, uint8_t *bits, uint16_t *scale) {
+  double num = 0, den = 0; memset(bits, 0, 16);
+  for (int i = 0; i < n; i++) { num += (double)imp[i] * std::fabs(w[i]); den += imp[i]; if (w[i] >= 0) bits[i >> 3] |= (uint8_t)(1 << (i & 7)); }
+  *scale = to_f16(den > 0 ? (float)(num / den) : 0.f);
+}
+const char *kUsage = "usage: qpack-quantize in.qpack out.qpack [--type q4|q4m|q8|q1|q1m] [--q1-attn q8|q4] [--keep-q8 name,...] [--q4-head] [--q4m-last-half] [--calib text.txt [--gptq [--act-order]]] [--calib-tokens 4096] [-t threads]\n";
 
 // statistics of every matrix input from running the source model over calibration text: mean squared activation per
 // column (importance), and with gptq the second moment H = sum x x^T (shared by matrices reading the same input)
@@ -201,7 +215,7 @@ void gptq_q4(const qp::Tensor &t, const std::vector<float> &Hf, uint8_t *q, uint
 }  // namespace
 
 int main(int argc, char **argv) {
-  std::string in, out, type = "q4", calib; int calib_tokens = 4096; bool gptq = false, act_order = false, q4_head = false, q4m_last_half = false; std::set<std::string> keep;
+  std::string in, out, type = "q4", calib; int calib_tokens = 4096; std::string q1_attn = "q8"; bool gptq = false, act_order = false, q4_head = false, q4m_last_half = false; std::set<std::string> keep;
   for (int i = 1; i < argc; i++) {
     std::string a = argv[i];
     if (a == "--type" && i + 1 < argc) type = argv[++i];
@@ -211,6 +225,7 @@ int main(int argc, char **argv) {
     } else if ((a == "-t" || a == "--threads") && i + 1 < argc) qp::set_threads(std::stoi(argv[++i]));
     else if (a == "--calib" && i + 1 < argc) calib = argv[++i];
     else if (a == "--calib-tokens" && i + 1 < argc) calib_tokens = std::stoi(argv[++i]);
+    else if (a == "--q1-attn" && i + 1 < argc) q1_attn = argv[++i];
     else if (a == "--gptq") gptq = true;
     else if (a == "--q4-head") q4_head = true;
     else if (a == "--q4m-last-half") q4m_last_half = true;
@@ -219,7 +234,7 @@ int main(int argc, char **argv) {
     else if (out.empty() && a[0] != '-') out = a;
     else { fputs(kUsage, stderr); return 2; }
   }
-  if (in.empty() || out.empty() || (type != "q4" && type != "q4m" && type != "q8")) { fputs(kUsage, stderr); return 2; }
+  if (in.empty() || out.empty() || (type != "q4" && type != "q4m" && type != "q8" && type != "q1" && type != "q1m") || (q1_attn != "q8" && q1_attn != "q4")) { fputs(kUsage, stderr); return 2; }
   if (q4m_last_half && type != "q4m") { fprintf(stderr, "--q4m-last-half requires --type q4m\n"); return 2; }
   if (!q4_head) for (const char *n : {"embed", "lm_head", "embed.weight", "lm_head.weight"}) keep.insert(n);
   try {
@@ -233,7 +248,7 @@ int main(int argc, char **argv) {
     std::set<std::string> tensor_blobs;
     for (auto &e : man["tensors"].arr)
       for (const char *f : {"blob", "scale", "alpha"}) if (e.has(f)) tensor_blobs.insert(e[f].as_str());
-    int64_t n_q4 = 0, n_q8 = 0, n_other = 0; int k = 0; const int n_layers = (int)src.config()["num_hidden_layers"].as_int(0);
+    int64_t n_q1 = 0, n_q4 = 0, n_q8 = 0, n_other = 0; int k = 0; const int n_layers = (int)src.config()["num_hidden_layers"].as_int(0);
     auto copy_blob = [&](const std::string &from, const std::string &bid) {   // keeps the extension (.f16, .i64, .scale, ...)
       size_t len; const uint8_t *p = src.blob(from, &len); const std::string to = bid + from.substr(from.find('.'));
       blobs.push_back({to, std::string((const char *)p, len)}); return to;
@@ -243,8 +258,9 @@ int main(int argc, char **argv) {
       const qp::Tensor *t = src.get(name);
       Json ent = Json::object(); ent.set("name", name); ent.set("shape", e["shape"]); ent.set("dtype", e["dtype"]);
       char b[16]; snprintf(b, sizeof b, "w%04d", k++); const std::string bid = b;
-      const bool matrix = t && t->shape.size() == 2 && t->numel() >= 4096 &&
-                          (t->kind == qp::Kind::F32 || t->kind == qp::Kind::F16 || t->kind == qp::Kind::Q8 || t->kind == qp::Kind::Q4);
+      // 2-D matrices, and 3-D [E, R, C] tensors (quantised as [E * R, C], never copied unquantised)
+      const bool matrix = t && (t->shape.size() == 2 || (t->shape.size() == 3 && t->kind != qp::Kind::Q8 && t->kind != qp::Kind::Q4 && t->kind != qp::Kind::Q1) || !t->orig_shape.empty()) && t->numel() >= 4096 &&
+                          (t->kind == qp::Kind::F32 || t->kind == qp::Kind::F16 || t->kind == qp::Kind::Q8 || t->kind == qp::Kind::Q4 || t->kind == qp::Kind::Q1);
       if (!matrix) {   // copied as stored (f16 tensors that are not matrices were widened to f32 at load: written as f32)
         if (t && t->kind == qp::Kind::F32 && kind == "f16") {
           blobs.push_back({bid + ".f32", std::string((const char *)t->data, 4 * t->numel())}); ent.set("kind", "f32"); ent.set("blob", bid + ".f32");
@@ -255,8 +271,32 @@ int main(int argc, char **argv) {
         }
         n_other += t ? t->numel() : 0; tensors.push(ent); continue;
       }
+      qp::Tensor tv = *t;   // 2-D view: a float [E, R, C] tensor is [E * R, C]
+      if (tv.shape.size() == 3) tv.shape = {tv.shape[0] * tv.shape[1], tv.shape[2]};
+      t = &tv;
       const int rows = (int)t->rows(), cols = (int)t->cols();
-      const bool to_q4 = (type == "q4" || (type == "q4m" && !more_bits(name, n_layers, q4m_last_half))) && cols % 32 == 0 && !keep.count(name);
+      const bool q1type = type == "q1" || type == "q1m";
+      const bool to_q1 = q1type && is_mlp(name) && !keep.count(name) && !(type == "q1m" && more_bits(name, n_layers, q4m_last_half));
+      const bool to_q4 = !to_q1 && ((q1type ? q1_attn == "q4" : (type == "q4" || (type == "q4m" && !more_bits(name, n_layers, q4m_last_half)))) && cols % 32 == 0 && !keep.count(name));
+      if (to_q1 && t->kind == qp::Kind::Q1) {   // already q1: copied
+        ent.set("kind", "q1"); ent.set("blob", copy_blob(e["blob"].as_str(), bid)); ent.set("scale", copy_blob(e["scale"].as_str(), bid)); ent.set("group", 128);
+        n_q1 += t->numel(); tensors.push(ent); continue;
+      }
+      if (to_q1) {
+        const int G = (cols + 127) / 128; std::string q((size_t)rows * G * 16, '\0'), sc((size_t)rows * G * 2, '\0');
+        auto it = imp.find(name); std::vector<float> ones(cols, 1.f);
+        const float *im = it != imp.end() && (int)it->second.size() == cols ? it->second.data() : ones.data();
+        qp::pool().parallel_for(rows, [&](int a, int b2) {
+          std::vector<float> row(cols);
+          for (int r = a; r < b2; r++) {
+            qp::row_f32(*t, r, row.data());
+            for (int g = 0; g < G; g++) q1_group(row.data() + 128 * g, im + 128 * g, std::min(128, cols - 128 * g), (uint8_t *)&q[((size_t)r * G + g) * 16], (uint16_t *)&sc[((size_t)r * G + g) * 2]);
+          }
+        }, 4);
+        blobs.push_back({bid + ".q1", std::move(q)}); blobs.push_back({bid + ".scale", std::move(sc)});
+        ent.set("kind", "q1"); ent.set("blob", bid + ".q1"); ent.set("scale", bid + ".scale"); ent.set("group", 128); n_q1 += t->numel();
+        tensors.push(ent); continue;
+      }
       if (!to_q4 && t->kind == qp::Kind::Q8) {   // already q8: copied, no second rounding
         ent.set("kind", "q8"); ent.set("blob", copy_blob(e["blob"].as_str(), bid)); ent.set("scale", copy_blob(e["scale"].as_str(), bid));
         n_q8 += t->numel(); tensors.push(ent); continue;
@@ -309,7 +349,7 @@ int main(int argc, char **argv) {
       auto ref = std::make_shared<qp::Container>(out);
       for (auto &kv : ref->tensors()) {
         qp::Tensor &t = kv.second;
-        if (t.shape.size() != 2 || (t.kind != qp::Kind::Q4 && t.kind != qp::Kind::Q8 && t.kind != qp::Kind::F16)) continue;
+        if (t.shape.size() != 2 || (t.kind != qp::Kind::Q4 && t.kind != qp::Kind::Q8 && t.kind != qp::Kind::Q1 && t.kind != qp::Kind::F16)) continue;
         std::vector<uint8_t> buf(4 * (size_t)t.numel());
         qp::pool().parallel_for((int)t.rows(), [&](int a, int b2) { for (int r = a; r < b2; r++) qp::row_f32(t, r, (float *)buf.data() + (size_t)r * t.cols()); }, 64);
         t.owned.swap(buf); t.data = t.owned.data(); t.kind = qp::Kind::F32; t.scale = nullptr; t.scale16 = nullptr;
@@ -331,8 +371,8 @@ int main(int argc, char **argv) {
     }
     qp::Container chk(out);
     const double s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
-    printf("%s -> %s: %.1f MiB -> %.1f MiB, q4 %.1fM / q8 %.1fM / other %.1fM params, %.1f s\n", in.c_str(), out.c_str(), src.file_size() / 1048576.0,
-           chk.file_size() / 1048576.0, n_q4 / 1e6, n_q8 / 1e6, n_other / 1e6, s);
+    printf("%s -> %s: %.1f MiB -> %.1f MiB, q1 %.1fM / q4 %.1fM / q8 %.1fM / other %.1fM params, %.1f s\n", in.c_str(), out.c_str(), src.file_size() / 1048576.0,
+           chk.file_size() / 1048576.0, n_q1 / 1e6, n_q4 / 1e6, n_q8 / 1e6, n_other / 1e6, s);
   } catch (const std::exception &e) { fprintf(stderr, "error: %s\n", e.what()); return 1; }
   return 0;
 }
