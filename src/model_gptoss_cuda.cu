@@ -411,7 +411,7 @@ class GptOssCuda : public Model {
     CK(cudaStreamCreateWithFlags(&st_, cudaStreamNonBlocking));
     embed_ = &c->at("embed");
     {   // memory check: the device holds everything but the embedding
-      size_t need = 0; for (auto &kv : c->tensors()) { const Tensor &t = kv.second; if (&t == embed_) continue; need += tensor_bytes(t); }
+      size_t need = 0; for (auto &kv : c->tensors()) { const Tensor &t = kv.second; if (&t == embed_) continue; if (kv.first.rfind("layers.", 0) == 0 && atoi(kv.first.c_str() + 7) >= L_) continue; need += tensor_bytes(t); }
       size_t fr = 0, tot = 0; CK(cudaMemGetInfo(&fr, &tot));
       const size_t kv = 2ull * L_ * ctx_ * kvd_ * 2 + (96u << 20);
       if (need + kv > fr) throw std::runtime_error("cuda gptoss: model needs ~" + std::to_string((need + kv) >> 20) + " MiB of device memory (weights " + std::to_string(need >> 20) + " + KV/buffers " + std::to_string(kv >> 20) + "), only " + std::to_string(fr >> 20) + " MiB free");
@@ -522,7 +522,7 @@ class GptOssCuda : public Model {
   static size_t tensor_bytes(const Tensor &t) {
     const size_t R = t.rows(), C = t.cols();
     switch (t.kind) {
-      case Kind::Q8G: return R * C + R * C / 32 * 2;
+      case Kind::Q8G: case Kind::Q8: return R * C + R * C / 32 * 2;
       case Kind::Mxfp4: return R * C / 2 + R * C / 32;
       case Kind::Q1: return R * ((C + 127) / 128) * 18;
       case Kind::F32: return 4 * (size_t)t.numel();
@@ -537,9 +537,14 @@ class GptOssCuda : public Model {
   }
   void copy_chunked(void *dst, const void *src, size_t n) { for (size_t o = 0; o < n; o += (64u << 20)) CK(cudaMemcpy((char *)dst + o, (const char *)src + o, std::min<size_t>(64u << 20, n - o), cudaMemcpyHostToDevice)); }
   DQ up_q8g(const Tensor &t) {
-    if (t.kind != Kind::Q8G) throw std::runtime_error("cuda gptoss: expected a q8g tensor (convert with --attn/--head q8g): " + t.name);
+    if (t.kind != Kind::Q8G && t.kind != Kind::Q8) throw std::runtime_error("cuda gptoss: expected a q8g (or per-row q8) tensor: " + t.name);
     const size_t R = t.rows(), C = t.cols(), U = C / 32; DQ m{};
-    m.rows = (int)R; void *w = dalloc(R * C); void *s = dalloc(R * U * 2); copy_chunked(s, t.scale16, R * U * 2);
+    m.rows = (int)R; void *w = dalloc(R * C); void *s = dalloc(R * U * 2);
+    if (t.kind == Kind::Q8G) copy_chunked(s, t.scale16, R * U * 2);
+    else {   // per-row q8: the row scale (rounded to fp16) replicated per group
+      std::vector<__half> hs(R * U); for (size_t r = 0; r < R; r++) for (size_t u = 0; u < U; u++) hs[r * U + u] = __float2half(t.scale[r]);
+      copy_chunked(s, hs.data(), R * U * 2);
+    }
     const size_t CR = std::max<size_t>(1, (16u << 20) / C); std::vector<int8_t> buf(CR * C); const int8_t *src = (const int8_t *)t.data;
     for (size_t r0 = 0; r0 < R; r0 += CR) {
       const size_t nr = std::min(CR, R - r0);

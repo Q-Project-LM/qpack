@@ -19,8 +19,8 @@ int main(int argc, char **argv) {
     else files.push_back(a);
   }
   try {
-    setenv("QPACK_DEVICE", "cpu", 1); qp::Session cpu(qp::load_model(path, n + 8));
-    setenv("QPACK_DEVICE", "cuda", 1); auto gpu = qp::load_model(path, n + 8);
+    setenv("QPACK_DEVICE", "cpu", 1); qp::Session cpu(qp::load_model(path, n + 48));
+    setenv("QPACK_DEVICE", "cuda", 1); auto gpu = qp::load_model(path, n + 48);
     int cases = 0, top1 = 0, pos_ok = 0, pos_all = 0; double maxd = 0, sumd = 0; long cnt = 0;
     for (auto &f : files) {
       std::ifstream in(f, std::ios::binary); std::stringstream ss; ss << in.rdbuf();
