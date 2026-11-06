@@ -163,6 +163,8 @@ std::unique_ptr<Model> make_llama_cuda(std::shared_ptr<Container> c, int max_ctx
 void cuda_matvec_bench(FILE *out);   // CUDA build only: q8 / q4 / q1 matvec bandwidth on Qwen2.5-0.5B shapes
 std::unique_ptr<Model> make_lfm3(std::shared_ptr<Container> c, int max_ctx);
 std::unique_ptr<Model> make_gptoss(std::shared_ptr<Container> c, int max_ctx);
+std::unique_ptr<Model> make_gptoss_cuda(std::shared_ptr<Container> c, int max_ctx);   // only with -DQPACK_CUDA=ON
+void cuda_gptoss_bench(FILE *out);   // CUDA build only
 std::unique_ptr<Model> make_nq(std::shared_ptr<Container> c, int max_ctx);
 
 // self-test stored in the container: top-1 must match and the top-5 logits must agree within tol
