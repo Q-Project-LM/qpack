@@ -130,7 +130,7 @@ def build(args):
             add(o + n, args.experts, (E, R, G * 32), ("mx4", p + f"mlp.experts.{h}_blocks", p + f"mlp.experts.{h}_scales"))
             add(o + "b_" + n[2:], "f32", st.shape(p + f"mlp.experts.{h}_bias"), ("dense", p + f"mlp.experts.{h}_bias"))
     add("final_norm", "f32", st.shape("model.norm.weight"), ("dense", "model.norm.weight"))
-    add("lm_head", args.embed, st.shape("lm_head.weight"), ("dense", "lm_head.weight"))
+    add("lm_head", args.head or args.embed, st.shape("lm_head.weight"), ("dense", "lm_head.weight"))
     plan, man = [], []
     for k, s in enumerate(specs):
         shp = s["shape"]; C = shp[-1] if len(shp) > 1 else 1; R = int(np.prod(shp[:-1])) if len(shp) > 1 else 1
@@ -209,6 +209,7 @@ def main():
     ap.add_argument("--experts", default="mxfp4", choices=["mxfp4", "q8", "q4", "q1"])
     ap.add_argument("--attn", default="q8", choices=["q8", "q4", "f16"])
     ap.add_argument("--embed", default="q8", choices=["q8", "q4", "f16"], help="embedding and lm_head")
+    ap.add_argument("--head", default=None, choices=["q8", "q4", "f16"], help="lm_head (default: same as --embed)")
     ap.add_argument("--router", default="f32", choices=["f32", "q8", "f16"])
     ap.add_argument("--layers", type=int, default=0, help="convert only the first N layers (debugging)")
     ap.add_argument("--selftest", default=None, help="selftest.json (reference top-5 logits) to embed")
