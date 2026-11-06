@@ -42,16 +42,18 @@ __device__ __forceinline__ float warp_sum(float v) { for (int o = 16; o; o >>= 1
 __device__ __forceinline__ unsigned nib_mask(unsigned n) { return ((n * 0x00204081u) & 0x01010101u) * 255u; }   // 4 bits -> 4 bytes 0x00 / 0xFF
 
 // quantise one group of 32 values (one per lane) to int8
-__device__ __forceinline__ void warp_actq(float v, int g, int l, int8_t *xq, float *xs, int *xsum) {
+__device__ __forceinline__ void warp_actq(float v, int g, int l, int8_t *xq, float *xs, int *xsum, int np) {
   float m = fabsf(v); for (int o = 16; o; o >>= 1) m = fmaxf(m, __shfl_xor_sync(~0u, m, o));
-  const float s = m / 32767.f, inv = s > 0 ? 1.f / s : 0.f;
-  int q = __float2int_rn(v * inv); q = max(-32767, min(32767, q)); xq[g * 32 + l] = (int8_t)(q >> 8); xq[PLANE + g * 32 + l] = (int8_t)(q & 255);
+  const int qm = np == 2 ? 32767 : 127;
+  const float s = m / (float)qm, inv = s > 0 ? 1.f / s : 0.f;
+  int q = __float2int_rn(v * inv); q = max(-qm, min(qm, q));
+  if (np == 2) { xq[g * 32 + l] = (int8_t)(q >> 8); xq[PLANE + g * 32 + l] = (int8_t)(q & 255); } else xq[g * 32 + l] = (int8_t)q;
   int sm = q; for (int o = 16; o; o >>= 1) sm += __shfl_xor_sync(~0u, sm, o);
   if (l == 0) { xs[g] = s; xsum[g] = sm; }
 }
 
 // dot product of weight row r with the quantised activations in shared memory; result in all lanes
-__device__ __forceinline__ float row_dot(const DMat &m, int r, int l, const int4 *sx, const int4 *sl, const float *sxs, const int *sxsum) {
+__device__ __forceinline__ float row_dot(const DMat &m, int r, int l, const int4 *sx, const int4 *sl, const float *sxs, const int *sxsum, int np) {
   const int cols = m.cols; float acc = 0;
   if (m.kind == K_Q4) {
     const int G = cols >> 5;
@@ -59,17 +61,20 @@ __device__ __forceinline__ float row_dot(const DMat &m, int r, int l, const int4
     for (int gb = 0; gb < G; gb += 32 * UN) {
       uint4 vv[UN];
 #pragma unroll
-      for (int u = 0; u < UN; u++) { const int g = gb + l + 32 * u; if (g < G) vv[u] = __ldg(w + g); }
+      for (int u = 0; u < UN; u++) { const int g = gb + l + 32 * u; if (g < G) vv[u] = __ldcs(w + g); }
 #pragma unroll
       for (int u = 0; u < UN; u++) {
         const int g = gb + l + 32 * u; if (g >= G) break;
-        const uint4 v = vv[u]; const int4 xl = sx[2 * g], xh = sx[2 * g + 1], ll = sl[2 * g], lh = sl[2 * g + 1]; const unsigned M = 0x0F0F0F0Fu;
+        const uint4 v = vv[u]; const int4 xl = sx[2 * g], xh = sx[2 * g + 1], ll = np == 2 ? sl[2 * g] : xl, lh = np == 2 ? sl[2 * g + 1] : xh; const unsigned M = 0x0F0F0F0Fu;
         const unsigned w0 = v.x & M, w1 = v.y & M, w2 = v.z & M, w3 = v.w & M, w4 = (v.x >> 4) & M, w5 = (v.y >> 4) & M, w6 = (v.z >> 4) & M, w7 = (v.w >> 4) & M;
         int d = dp4a_us(w0, xl.x, 0); d = dp4a_us(w1, xl.y, d); d = dp4a_us(w2, xl.z, d); d = dp4a_us(w3, xl.w, d);
         d = dp4a_us(w4, xh.x, d); d = dp4a_us(w5, xh.y, d); d = dp4a_us(w6, xh.z, d); d = dp4a_us(w7, xh.w, d);
-        int e = dp4a_uu(w0, (unsigned)ll.x, 0); e = dp4a_uu(w1, (unsigned)ll.y, e); e = dp4a_uu(w2, (unsigned)ll.z, e); e = dp4a_uu(w3, (unsigned)ll.w, e);
-        e = dp4a_uu(w4, (unsigned)lh.x, e); e = dp4a_uu(w5, (unsigned)lh.y, e); e = dp4a_uu(w6, (unsigned)lh.z, e); e = dp4a_uu(w7, (unsigned)lh.w, e);
-        d = (d << 8) + e - 8 * sxsum[g];
+        if (np == 2) {
+          int e = dp4a_uu(w0, (unsigned)ll.x, 0); e = dp4a_uu(w1, (unsigned)ll.y, e); e = dp4a_uu(w2, (unsigned)ll.z, e); e = dp4a_uu(w3, (unsigned)ll.w, e);
+          e = dp4a_uu(w4, (unsigned)lh.x, e); e = dp4a_uu(w5, (unsigned)lh.y, e); e = dp4a_uu(w6, (unsigned)lh.z, e); e = dp4a_uu(w7, (unsigned)lh.w, e);
+          d = (d << 8) + e;
+        }
+        d -= 8 * sxsum[g];
         acc += (float)d * (sxs[g] * h2f(__ldg(s + g)));
       }
     }
@@ -78,14 +83,16 @@ __device__ __forceinline__ float row_dot(const DMat &m, int r, int l, const int4
     for (int cb = 0; cb < nch; cb += 32 * UN) {
       uint4 vv[UN];
 #pragma unroll
-      for (int u = 0; u < UN; u++) { const int c = cb + l + 32 * u; if (c < nch) vv[u] = __ldg(w + c); }
+      for (int u = 0; u < UN; u++) { const int c = cb + l + 32 * u; if (c < nch) vv[u] = __ldcs(w + c); }
 #pragma unroll
       for (int u = 0; u < UN; u++) {
         const int c = cb + l + 32 * u; if (c >= nch) break;
-        const uint4 v = vv[u]; const int4 x = sx[c], y = sl[c];
+        const uint4 v = vv[u]; const int4 x = sx[c], y = np == 2 ? sl[c] : x;
         int d = __dp4a((int)v.x, x.x, 0); d = __dp4a((int)v.y, x.y, d); d = __dp4a((int)v.z, x.z, d); d = __dp4a((int)v.w, x.w, d);
-        int e = dp4a_su((int)v.x, (unsigned)y.x, 0); e = dp4a_su((int)v.y, (unsigned)y.y, e); e = dp4a_su((int)v.z, (unsigned)y.z, e); e = dp4a_su((int)v.w, (unsigned)y.w, e);
-        d = (d << 8) + e;
+        if (np == 2) {
+          int e = dp4a_su((int)v.x, (unsigned)y.x, 0); e = dp4a_su((int)v.y, (unsigned)y.y, e); e = dp4a_su((int)v.z, (unsigned)y.z, e); e = dp4a_su((int)v.w, (unsigned)y.w, e);
+          d = (d << 8) + e;
+        }
         acc += (float)d * sxs[c >> 1];
       }
     }
@@ -96,8 +103,8 @@ __device__ __forceinline__ float row_dot(const DMat &m, int r, int l, const int4
     for (int c = l; c < C; c += 32) {
       const unsigned bits = __ldg(w + c); int s1 = 0, s2 = 0;
 #pragma unroll
-      for (int i = 0; i < 8; i++) { const unsigned mk = nib_mask((bits >> (4 * i)) & 15u); s1 = __dp4a((int)(xi[8 * c + i] & mk), 0x01010101, s1); s2 = dp4a_uu((unsigned)xj[8 * c + i] & mk, 0x01010101u, s2); }
-      acc += (float)(2 * ((s1 << 8) + s2) - sxsum[c]) * (sxs[c] * h2f(__ldg(s + (c >> 2))));
+      for (int i = 0; i < 8; i++) { const unsigned mk = nib_mask((bits >> (4 * i)) & 15u); s1 = __dp4a((int)(xi[8 * c + i] & mk), 0x01010101, s1); if (np == 2) s2 = dp4a_uu((unsigned)xj[8 * c + i] & mk, 0x01010101u, s2); }
+      acc += (float)(2 * (np == 2 ? (s1 << 8) + s2 : s1) - sxsum[c]) * (sxs[c] * h2f(__ldg(s + (c >> 2))));
     }
   }
   return warp_sum(acc);
@@ -119,7 +126,7 @@ __global__ void k_embed(DMat e, const Ctl *ctl, float *x) {
 }
 
 // y = rmsnorm(x) * w, quantised per 32 columns (one block of 1024 threads, n <= 1024); optionally also stored as float
-__global__ void __launch_bounds__(1024) k_norm_actq(const float *x, const float *w, int n, float eps, int8_t *xq, float *xs, int *xsum, float *yf) {
+__global__ void __launch_bounds__(1024) k_norm_actq(const float *x, const float *w, int n, float eps, int8_t *xq, float *xs, int *xsum, float *yf, int np) {
   __shared__ float red[32]; __shared__ float sy[1024];
   const int t = threadIdx.x, wp = t >> 5, l = t & 31;
   const float xv = t < n ? x[t] : 0.f;
@@ -128,17 +135,24 @@ __global__ void __launch_bounds__(1024) k_norm_actq(const float *x, const float 
   const float inv = 1.f / sqrtf(tot / n + eps);
   if (t < n) { const float y = xv * inv * w[t]; sy[t] = y; if (yf) yf[t] = y; }
   __syncthreads();
-  if (wp < (n >> 5)) warp_actq(sy[t], wp, l, xq, xs, xsum);
+  if (wp < (n >> 5)) warp_actq(sy[t], wp, l, xq, xs, xsum, np);
 }
 
 struct MvArgs {
   DMat m[3]; const float *bias[3]; float *out[3]; int nm; int rowstart[4];
-  const int8_t *xq; const float *xs; const int *xsum; int cols;
+  const int8_t *xq; const float *xs; const int *xsum; int cols, np;
   float *resid;   // non-null: out = resid += y
+  const Ctl *ctl; const char *pfk, *pfv; int kvd;   // optional: prefetch the K / V cache of this layer (positions 0..pos) into L2
 };
 // up to three matrices sharing one input vector; warp per row
 template <int WPB> __global__ void __launch_bounds__(WPB * 32) k_mv(MvArgs a) {
   extern __shared__ int4 smem[];
+  if (a.pfk) {
+    const size_t bytes = (size_t)(a.ctl->pos + 1) * a.kvd * 2, nl = (bytes + 127) / 128;
+    for (size_t i = (size_t)blockIdx.x * (WPB * 32) + threadIdx.x; i < nl; i += (size_t)gridDim.x * (WPB * 32)) {
+      asm volatile("prefetch.global.L2 [%0];" :: "l"(a.pfk + i * 128)); asm volatile("prefetch.global.L2 [%0];" :: "l"(a.pfv + i * 128));
+    }
+  }
   const int cols = a.cols, G = cols >> 5;
   int4 *sx = smem, *sl = smem + (cols >> 4); float *sxs = (float *)(smem + 2 * (cols >> 4)); int *sxsum = (int *)(sxs + G);
   for (int i = threadIdx.x; i < (cols >> 4); i += WPB * 32) { sx[i] = ((const int4 *)a.xq)[i]; sl[i] = ((const int4 *)(a.xq + PLANE))[i]; }
@@ -148,7 +162,7 @@ template <int WPB> __global__ void __launch_bounds__(WPB * 32) k_mv(MvArgs a) {
   if (r >= a.rowstart[a.nm]) return;
   int i = 0; while (r >= a.rowstart[i + 1]) i++;
   r -= a.rowstart[i];
-  float y = row_dot(a.m[i], r, l, sx, sl, sxs, sxsum);
+  float y = row_dot(a.m[i], r, l, sx, sl, sxs, sxsum, a.np);
   if (l == 0) {
     if (a.bias[i]) y += a.bias[i][r];
     if (a.resid) a.resid[r] += y; else a.out[i][r] = y;
@@ -156,7 +170,7 @@ template <int WPB> __global__ void __launch_bounds__(WPB * 32) k_mv(MvArgs a) {
 }
 
 // gate and up rows for 32 consecutive output rows per block (NW warps, 32 / NW rows each), h = silu(gate) * up, quantised
-template <int NW> __global__ void __launch_bounds__(NW * 32) k_gateup(DMat g, DMat u, const int8_t *xq, const float *xs, const int *xsum, int8_t *hq, float *hs, int *hsum) {
+template <int NW> __global__ void __launch_bounds__(NW * 32) k_gateup(DMat g, DMat u, const int8_t *xq, const float *xs, const int *xsum, int8_t *hq, float *hs, int *hsum, int np, int npo) {
   extern __shared__ int4 smem[];
   const int cols = g.cols, G = cols >> 5;
   int4 *sx = smem, *sl = smem + (cols >> 4); float *sxs = (float *)(smem + 2 * (cols >> 4)); int *sxsum = (int *)(sxs + G); __shared__ float sh[32];
@@ -166,82 +180,155 @@ template <int NW> __global__ void __launch_bounds__(NW * 32) k_gateup(DMat g, DM
   const int wp = threadIdx.x >> 5, l = threadIdx.x & 31;
   for (int i = 0; i < 32 / NW; i++) {
     const int rl = wp * (32 / NW) + i, r = blockIdx.x * 32 + rl;
-    const float gg = row_dot(g, r, l, sx, sl, sxs, sxsum), uu = row_dot(u, r, l, sx, sl, sxs, sxsum);
+    const float gg = row_dot(g, r, l, sx, sl, sxs, sxsum, np), uu = row_dot(u, r, l, sx, sl, sxs, sxsum, np);
     if (l == 0) sh[rl] = gg / (1.f + expf(-gg)) * uu;
   }
   __syncthreads();
-  if (wp == 0) warp_actq(sh[l], blockIdx.x, l, hq, hs, hsum);
+  if (wp == 0) warp_actq(sh[l], blockIdx.x, l, hq, hs, hsum, npo);
 }
 
-constexpr int CH = 16;   // positions per attention block
-// block = (kv group, chunk of CH positions), HD threads = CH positions x SPLIT lanes (16 dims each). q is rotated on the fly; the
-// block holding the current position also rotates k and appends k / v to the fp16 cache.
-template <int HD> __global__ void __launch_bounds__(HD) k_attn(const float *q, const float *kn, const float *vn, const float *cs, const float *sn, const __half *kcc, const __half *vcc,
-                                                               float *part, const Ctl *ctl, int rep, int nkv, int nch, float scl, int dbg) {
+__device__ long long g_clk[16];
+#define CLK(i) do { if (dbg == 9 && blockIdx.x == 0 && blockIdx.y == 0 && threadIdx.x == 0) g_clk[i] = clock64(); } while (0)
+constexpr int CH = 16;    // positions per attention block
+constexpr int ANT = 256;   // attention block size: a decode token has too little work per block to hide instruction latency with few threads
+// block = (kv group, chunk of CH positions), 256 threads. Scores: CH positions x 16 lanes (HD/16 dims each); values: thread = (dim d,
+// head subset). All global loads (q, k / v of the cache chunk, the new k / v, rope tables) are issued up front so their latencies
+// overlap. q is rotated on the fly; the position being decoded takes its rotated k / v from shared memory (rounded to fp16 like the
+// cache) and the block holding it appends them to the cache.
+template <int HD> __global__ void __launch_bounds__(ANT) k_attn(const float *q, const float *kn, const float *vn, const float *cs, const float *sn, const __half *kcc, const __half *vcc,
+                                                                float *part, const Ctl *ctl, int rep, int nkv, int nch, float scl, int dbg) {
   __half *kc = (__half *)kcc, *vc = (__half *)vcc;
-  constexpr int SPLIT = HD / CH;   // 4 (hd 64) or 8 (hd 128)
+  constexpr int DPL = HD / 16, GR = ANT / HD, NA = 8 / GR;   // dims per score lane; head groups in the value phase; heads per group
   const int g = blockIdx.x, c = blockIdx.y, pos = ctl->pos, T = pos + 1, t0 = c * CH; if (t0 >= T) return;
-  const int n = min(CH, T - t0), tid = threadIdx.x, kvd = nkv * HD, half = HD / 2;
-  __shared__ __align__(16) float sq[8 * HD]; __shared__ float sc[8][CH]; __shared__ float pm[8], ps[8];
-  const float *cp = cs + (size_t)pos * half, *sp = sn + (size_t)pos * half;
-  if (tid < half) {
-    const float cc = cp[tid], ss = sp[tid]; float qa[8], qb[8];
+  CLK(0);
+  const int n = min(CH, T - t0), tid = threadIdx.x, kvd = nkv * HD, half = HD / 2, pl = pos - t0;   // pl in [0, CH) only in the last chunk
+  const bool last = pl >= 0 && pl < CH;
+  __shared__ __align__(16) float sq[8 * HD]; __shared__ float sc[8][CH]; __shared__ float pm[8], ps[8]; __shared__ float sk[HD], sv[HD];
+  const int p = tid / 16, sb = tid % 16, d = tid % HD, grp = tid / HD;
+  // ---- loads
+  __half2 kh[DPL / 2];
 #pragma unroll
-    for (int j = 0; j < 8; j++) if (j < rep) { const float *p = q + (size_t)(g * rep + j) * HD; qa[j] = p[tid]; qb[j] = p[tid + half]; }
+  for (int e = 0; e < DPL / 2; e++) kh[e] = __float2half2_rn(0.f);
+  if (p < n && p != pl) { const __half2 *kr = (const __half2 *)(kc + (size_t)(t0 + p) * kvd + g * HD + sb * DPL);
 #pragma unroll
-    for (int j = 0; j < 8; j++) if (j < rep) { sq[j * HD + tid] = qa[j] * cc - qb[j] * ss; sq[j * HD + tid + half] = qb[j] * cc + qa[j] * ss; }
+    for (int e = 0; e < DPL / 2; e++) kh[e] = kr[e]; }
+  float vv[CH];
+#pragma unroll
+  for (int t = 0; t < CH; t++) vv[t] = (t < n && t != pl) ? __half2float(vc[(size_t)(t0 + t) * kvd + g * HD + d]) : 0.f;
+  constexpr int NR = (8 * HD / 2 + ANT - 1) / ANT;   // rope work items (head, pair) per thread
+  float qa[NR], qb[NR], qc[NR], qs[NR], ka = 0, kb = 0, kcs = 0, ksn = 0, vnew = 0;
+#pragma unroll
+  for (int r = 0; r < NR; r++) {
+    const int idx = tid + r * ANT, rj = idx / half, ri = idx % half; qa[r] = qb[r] = qc[r] = qs[r] = 0;
+    if (rj < rep) { const float *pq = q + (size_t)(g * rep + rj) * HD; qa[r] = pq[ri]; qb[r] = pq[ri + half]; qc[r] = cs[(size_t)pos * half + ri]; qs[r] = sn[(size_t)pos * half + ri]; }
   }
-  if (pos >= t0 && pos < t0 + CH) {   // this block owns the current position of its group
-    vc[(size_t)pos * kvd + g * HD + tid] = __float2half(vn[g * HD + tid]);
+  if (last && tid < half) { ka = kn[g * HD + tid]; kb = kn[g * HD + tid + half]; kcs = cs[(size_t)pos * half + tid]; ksn = sn[(size_t)pos * half + tid]; }
+  if (last && tid < HD) vnew = vn[g * HD + tid];
+#pragma unroll
+  for (int t = 0; t < CH; t++) asm volatile("" : "+f"(vv[t]));
+  // ---- rope, current k / v
+#pragma unroll
+  for (int r = 0; r < NR; r++) {
+    const int idx = tid + r * ANT, rj = idx / half, ri = idx % half;
+    if (rj < rep) { sq[rj * HD + ri] = qa[r] * qc[r] - qb[r] * qs[r]; sq[rj * HD + ri + half] = qb[r] * qc[r] + qa[r] * qs[r]; }
+  }
+  if (last) {
     if (tid < half) {
-      const float cc = cp[tid], ss = sp[tid], a = kn[g * HD + tid], b = kn[g * HD + tid + half];
-      kc[(size_t)pos * kvd + g * HD + tid] = __float2half(a * cc - b * ss); kc[(size_t)pos * kvd + g * HD + tid + half] = __float2half(b * cc + a * ss);
+      const __half h0 = __float2half(ka * kcs - kb * ksn), h1 = __float2half(kb * kcs + ka * ksn);
+      sk[tid] = __half2float(h0); sk[tid + half] = __half2float(h1);
+      kc[(size_t)pos * kvd + g * HD + tid] = h0; kc[(size_t)pos * kvd + g * HD + tid + half] = h1;
     }
+    if (tid < HD) { const __half hv = __float2half(vnew); sv[tid] = __half2float(hv); vc[(size_t)pos * kvd + g * HD + tid] = hv; }
   }
   __syncthreads();
-  if (dbg == 1) return;
+  CLK(1);
+  // ---- scores
   {
-    const int p = tid / SPLIT, sb = tid % SPLIT; float s[8]; for (int j = 0; j < 8; j++) s[j] = 0;
+    float s[8];
+#pragma unroll
+    for (int j = 0; j < 8; j++) s[j] = 0;
     if (p < n) {
-      const uint4 *kr = (const uint4 *)(kc + (size_t)(t0 + p) * kvd + g * HD + sb * 16);
-      const uint4 u0 = kr[0], u1 = kr[1]; float kf[16];
-      { const __half2 *h2 = (const __half2 *)&u0; for (int e = 0; e < 4; e++) { const float2 f = __half22float2(h2[e]); kf[2 * e] = f.x; kf[2 * e + 1] = f.y; } }
-      { const __half2 *h2 = (const __half2 *)&u1; for (int e = 0; e < 4; e++) { const float2 f = __half22float2(h2[e]); kf[8 + 2 * e] = f.x; kf[9 + 2 * e] = f.y; } }
-      for (int j = 0; j < 8; j++) if (j < rep) { const float4 *qj = (const float4 *)(sq + j * HD + sb * 16); for (int e = 0; e < 4; e++) { const float4 qv = qj[e]; s[j] = fmaf(qv.x, kf[4 * e], s[j]); s[j] = fmaf(qv.y, kf[4 * e + 1], s[j]); s[j] = fmaf(qv.z, kf[4 * e + 2], s[j]); s[j] = fmaf(qv.w, kf[4 * e + 3], s[j]); } }
+      float kf[DPL];
+      if (p == pl) {
+#pragma unroll
+        for (int e = 0; e < DPL; e++) kf[e] = sk[sb * DPL + e];
+      } else {
+#pragma unroll
+        for (int e = 0; e < DPL / 2; e++) { const float2 f = __half22float2(kh[e]); kf[2 * e] = f.x; kf[2 * e + 1] = f.y; }
+      }
+#pragma unroll
+      for (int j = 0; j < 8; j++) if (j < rep) {
+#pragma unroll
+        for (int e = 0; e < DPL; e++) s[j] = fmaf(sq[j * HD + sb * DPL + e], kf[e], s[j]);
+      }
     }
-    for (int j = 0; j < 8; j++) { float v = s[j]; for (int o = 1; o < SPLIT; o <<= 1) v += __shfl_xor_sync(~0u, v, o); if (j < rep && sb == 0 && p < n) sc[j][p] = v * scl; }
+#pragma unroll
+    for (int j = 0; j < 8; j++) { float v = s[j]; for (int o = 1; o < 16; o <<= 1) v += __shfl_xor_sync(~0u, v, o); if (j < rep && sb == 0 && p < n) sc[j][p] = v * scl; }
   }
   __syncthreads();
-  if (dbg == 2) return;
-  const int wp = tid >> 5, l = tid & 31;
-  for (int j = wp; j < rep; j += HD / 32) {
-    float mx = -1e30f; for (int t = l; t < n; t += 32) mx = fmaxf(mx, sc[j][t]);
-    for (int o = 16; o; o >>= 1) mx = fmaxf(mx, __shfl_xor_sync(~0u, mx, o));
-    float sum = 0; for (int t = l; t < n; t += 32) { const float e = expf(sc[j][t] - mx); sc[j][t] = e; sum += e; }
-    sum = warp_sum(sum); if (l == 0) { pm[j] = mx; ps[j] = sum; }
+  CLK(2);
+  // ---- softmax: 16 lanes per head
+  if (tid / 16 < rep) {
+    const int j = tid / 16, l16 = tid & 15; const float v = l16 < n ? sc[j][l16] : -1e30f; float mx = v;
+    for (int o = 8; o; o >>= 1) mx = fmaxf(mx, __shfl_xor_sync(~0u, mx, o, 16));
+    const float e = l16 < n ? expf(v - mx) : 0.f; float sum = e;
+    for (int o = 8; o; o >>= 1) sum += __shfl_xor_sync(~0u, sum, o, 16);
+    sc[j][l16] = e; if (l16 == 0) { pm[j] = mx; ps[j] = sum; }
   }
   __syncthreads();
-  if (dbg == 3) return;
-  float acc[8]; for (int j = 0; j < 8; j++) acc[j] = 0;
-  float vv[CH]; for (int t = 0; t < CH; t++) vv[t] = t < n ? __half2float(vc[(size_t)(t0 + t) * kvd + g * HD + tid]) : 0.f;
+  CLK(3);
+  // ---- values: thread (d, grp) accumulates heads grp, grp + GR, ...
+  float acc[NA];
+#pragma unroll
+  for (int i = 0; i < NA; i++) acc[i] = 0;
 #pragma unroll
   for (int t = 0; t < CH; t++) {
+    const float v = t == pl ? sv[d] : vv[t];
 #pragma unroll
-    for (int j = 0; j < 8; j++) if (j < rep) acc[j] = fmaf(t < n ? sc[j][t] : 0.f, vv[t], acc[j]);
+    for (int i = 0; i < NA; i++) { const int j = grp + i * GR; if (j < rep) acc[i] = fmaf(t < n ? sc[j][t] : 0.f, v, acc[i]); }
   }
 #pragma unroll
-  for (int j = 0; j < 8; j++) if (j < rep) { float *pp = part + ((size_t)(g * rep + j) * nch + c) * (HD + 2); pp[2 + tid] = acc[j]; if (tid == 0) { pp[0] = pm[j]; pp[1] = ps[j]; } }
+  for (int i = 0; i < NA; i++) { const int j = grp + i * GR; if (j < rep) { float *pp = part + ((size_t)(g * rep + j) * nch + c) * (HD + 2); pp[2 + d] = acc[i]; if (d == 0) { pp[0] = pm[j]; pp[1] = ps[j]; } } }
+  CLK(5);
 }
 
 // merge the chunk partials of one head and quantise the result (block = one head, HD threads, one warp per 32 dims)
-template <int HD> __global__ void k_merge(const float *part, const Ctl *ctl, int nch, int8_t *xq, float *xs, int *xsum) {
+template <int HD> __global__ void k_merge(const float *part, const Ctl *ctl, int nch, int8_t *xq, float *xs, int *xsum, int np) {
   const int h = blockIdx.x, d = threadIdx.x, T = ctl->pos + 1, nc = (T + CH - 1) / CH;
   const float *ph = part + (size_t)h * nch * (HD + 2); float M = -1e30f;
   for (int c = 0; c < nc; c++) M = fmaxf(M, ph[(size_t)c * (HD + 2)]);
   float L = 0, o = 0;
   for (int c = 0; c < nc; c++) { const float *pc = ph + (size_t)c * (HD + 2); const float f = expf(pc[0] - M); L += pc[1] * f; o += f * pc[2 + d]; }
   o /= L;
-  warp_actq(o, h * (HD / 32) + (d >> 5), d & 31, xq, xs, xsum);
+  warp_actq(o, h * (HD / 32) + (d >> 5), d & 31, xq, xs, xsum, np);
+}
+
+// greedy sampling on the device: per-block argmax (ties -> lowest index, like the host scan), then one block merges the partials,
+// stores the token as out[pos], and advances the control block (next token, next position) so tokens chain without the host
+constexpr int AM_BLOCKS = 64;
+__global__ void __launch_bounds__(1024) k_argmax1(const float *x, int n, float *pv, int *pi) {
+  float bv = -3.4e38f; int bi = 0x7fffffff;
+  for (int i = blockIdx.x * 1024 + threadIdx.x; i < n; i += AM_BLOCKS * 1024) { const float v = x[i]; if (v > bv || (v == bv && i < bi)) { bv = v; bi = i; } }
+  for (int o = 16; o; o >>= 1) { const float ov = __shfl_xor_sync(~0u, bv, o); const int oi = __shfl_xor_sync(~0u, bi, o); if (ov > bv || (ov == bv && oi < bi)) { bv = ov; bi = oi; } }
+  __shared__ float sv[32]; __shared__ int si[32];
+  if ((threadIdx.x & 31) == 0) { sv[threadIdx.x >> 5] = bv; si[threadIdx.x >> 5] = bi; }
+  __syncthreads();
+  if (threadIdx.x < 32) {
+    bv = sv[threadIdx.x]; bi = si[threadIdx.x];
+    for (int o = 16; o; o >>= 1) { const float ov = __shfl_xor_sync(~0u, bv, o); const int oi = __shfl_xor_sync(~0u, bi, o); if (ov > bv || (ov == bv && oi < bi)) { bv = ov; bi = oi; } }
+    if (threadIdx.x == 0) { pv[blockIdx.x] = bv; pi[blockIdx.x] = bi; }
+  }
+}
+__global__ void k_argmax2(const float *pv, const int *pi, Ctl *ctl, int *out) {
+  float bv = pv[threadIdx.x]; int bi = pi[threadIdx.x];   // 64 threads = 2 warps
+  for (int o = 16; o; o >>= 1) { const float ov = __shfl_xor_sync(~0u, bv, o); const int oi = __shfl_xor_sync(~0u, bi, o); if (ov > bv || (ov == bv && oi < bi)) { bv = ov; bi = oi; } }
+  __shared__ float sv[2]; __shared__ int si[2];
+  if ((threadIdx.x & 31) == 0) { sv[threadIdx.x >> 5] = bv; si[threadIdx.x >> 5] = bi; }
+  __syncthreads();
+  if (threadIdx.x == 0) {
+    if (sv[1] > sv[0] || (sv[1] == sv[0] && si[1] < si[0])) { sv[0] = sv[1]; si[0] = si[1]; }
+    out[ctl->pos] = si[0]; ctl->tok = si[0]; ctl->pos++;
+  }
 }
 
 // ------------------------------------------------------------------ host
@@ -276,24 +363,27 @@ class LlamaCuda : public Model {
     const size_t kvn = (size_t)L_ * ctx_ * kvd_;
     CK(cudaMalloc(&kc_, kvn * 2)); CK(cudaMalloc(&vc_, kvn * 2)); CK(cudaMemset(kc_, 0, kvn * 2)); CK(cudaMemset(vc_, 0, kvn * 2));
     nch_ = (ctx_ + CH - 1) / CH;
-    auto fl = [&](float **p, size_t n) { CK(cudaMalloc(p, n * 4)); };
+    // all small per-token state in one arena (few pages: the TLB entries of scattered small buffers are cold after 350 MB of streamed weights)
+    const size_t arena_n = ((size_t)ctx_ * (hd_ / 2) * 8 + (size_t)nh_ * nch_ * (hd_ + 2) * 4 + (size_t)V_ * 4 + (1 << 20) + (size_t)ctx_ * 4 + 4095) & ~(size_t)4095;
+    CK(cudaMalloc(&arena_, arena_n)); size_t aoff = 0;
+    auto ab = [&](size_t n) { void *r = (char *)arena_ + aoff; aoff += (n + 255) & ~(size_t)255; if (aoff > arena_n) throw std::runtime_error("arena overflow"); return r; };
+    auto fl = [&](float **p, size_t n) { *p = (float *)ab(n * 4); };
     fl(&x_, d_); fl(&q_, qd_); fl(&k_, kvd_); fl(&v_, kvd_); fl(&xn_, d_); fl(&logits_, V_); fl(&part_, (size_t)nh_ * nch_ * (hd_ + 2));
     const int maxA = std::max(std::max(d_, qd_), ff_);
-    for (int i = 0; i < 2; i++) { CK(cudaMalloc(&aq_[i], 2 * PLANE)); fl(&as_[i], maxA / 32); CK(cudaMalloc(&asum_[i], maxA / 32 * 4)); }
-    CK(cudaMalloc(&ctl_, sizeof(Ctl)));
-    CK(cudaMallocHost(&hctl_, RING * sizeof(Ctl))); CK(cudaMallocHost(&hlog_, (size_t)V_ * 4)); CK(cudaMallocHost(&hxn_, (size_t)d_ * 4));
+    for (int i = 0; i < 2; i++) { aq_[i] = (int8_t *)ab(2 * PLANE); fl(&as_[i], maxA / 32); asum_[i] = (int *)ab(maxA / 32 * 4); }
+    ctl_ = (Ctl *)ab(sizeof(Ctl)); amv_ = (float *)ab(AM_BLOCKS * 4); ami_ = (int *)ab(AM_BLOCKS * 4); out_ = (int *)ab((size_t)ctx_ * 4);
+    CK(cudaMallocHost(&hctl_, RING * sizeof(Ctl))); CK(cudaMallocHost(&hlog_, (size_t)V_ * 4)); CK(cudaMallocHost(&hxn_, (size_t)d_ * 4)); CK(cudaMallocHost(&hout_, (size_t)ctx_ * 4));
     const int half = hd_ / 2; std::vector<float> cs((size_t)ctx_ * half), sn((size_t)ctx_ * half);
     for (int p = 0; p < ctx_; p++) for (int i = 0; i < half; i++) { const double inv = 1.0 / std::pow(theta, (2.0 * i) / hd_), a = p * inv; cs[(size_t)p * half + i] = (float)std::cos(a); sn[(size_t)p * half + i] = (float)std::sin(a); }
-    CK(cudaMalloc(&cos_, cs.size() * 4)); CK(cudaMalloc(&sin_, sn.size() * 4));
+    cos_ = (float *)ab(cs.size() * 4); sin_ = (float *)ab(sn.size() * 4);
     CK(cudaMemcpy(cos_, cs.data(), cs.size() * 4, cudaMemcpyHostToDevice)); CK(cudaMemcpy(sin_, sn.data(), sn.size() * 4, cudaMemcpyHostToDevice));
     build_graphs();
   }
   ~LlamaCuda() override {
     for (void *p : allocs_) cudaFree(p);
-    cudaFree(kc_); cudaFree(vc_); cudaFree(x_); cudaFree(q_); cudaFree(k_); cudaFree(v_); cudaFree(xn_); cudaFree(logits_); cudaFree(part_); cudaFree(ctl_); cudaFree(cos_); cudaFree(sin_);
-    for (int i = 0; i < 2; i++) { cudaFree(aq_[i]); cudaFree(as_[i]); cudaFree(asum_[i]); }
-    cudaFreeHost(hctl_); cudaFreeHost(hlog_); cudaFreeHost(hxn_);
-    if (ga_) cudaGraphExecDestroy(ga_); if (gb_) cudaGraphExecDestroy(gb_); cudaStreamDestroy(st_);
+    cudaFree(kc_); cudaFree(vc_); cudaFree(arena_);
+        cudaFreeHost(hctl_); cudaFreeHost(hlog_); cudaFreeHost(hxn_); cudaFreeHost(hout_);
+    if (ga_) cudaGraphExecDestroy(ga_); if (gb_) cudaGraphExecDestroy(gb_); if (gc_) cudaGraphExecDestroy(gc_); cudaStreamDestroy(st_);
   }
   int vocab() const override { return V_; }
   int hidden() const override { return d_; }
@@ -314,6 +404,18 @@ class LlamaCuda : public Model {
     for (int l = 0; l < L_; l++) for (__half *buf : {kc_, vc_}) { CK(cudaMemcpy(buf + (size_t)l * ctx_ * kvd_, p, n, cudaMemcpyHostToDevice)); p += n; }
   }
 
+  // n greedy tokens without any host round trip per token: the device argmax feeds the next step
+  int greedy_run(int tok, int n, int *out) override {
+    n = std::min(n, ctx_ - pos_); if (n <= 0) return 0;
+    if (tok < 0 || tok >= V_) throw std::runtime_error("token id out of range");
+    Ctl &c = hctl_[slot_ % RING]; c.tok = tok; c.pos = pos_; slot_++;
+    const int p0 = pos_;
+    CK(cudaMemcpyAsync(ctl_, &c, sizeof(Ctl), cudaMemcpyHostToDevice, st_));
+    for (int i = 0; i < n; i++) { CK(cudaGraphLaunch(ga_, st_)); CK(cudaGraphLaunch(gc_, st_)); }
+    CK(cudaMemcpyAsync(hout_, out_ + p0, (size_t)n * 4, cudaMemcpyDeviceToHost, st_)); CK(cudaStreamSynchronize(st_));
+    memcpy(out, hout_, (size_t)n * 4); pos_ += n; pending_ = 0; return n;
+  }
+
   const float *step(int tok, int want) override {
     if (pos_ >= ctx_) throw std::runtime_error("context window full (" + std::to_string(ctx_) + " tokens)");
     if (tok < 0 || tok >= V_) throw std::runtime_error("token id out of range");
@@ -321,6 +423,7 @@ class LlamaCuda : public Model {
     CK(cudaMemcpyAsync(ctl_, &c, sizeof(Ctl), cudaMemcpyHostToDevice, st_));
     CK(cudaGraphLaunch(ga_, st_)); pos_++;
     if (!want) { if (++pending_ >= RING / 2) { CK(cudaStreamSynchronize(st_)); pending_ = 0; } return nullptr; }
+    if (dbg_ == 9 && pos_ == 70) { CK(cudaStreamSynchronize(st_)); long long h[16]; CK(cudaMemcpyFromSymbol(h, g_clk, sizeof h)); fprintf(stderr, "attn clk: loads+rope %lld scores %lld softmax %lld pv+write %lld\n", h[1]-h[0], h[2]-h[1], h[3]-h[2], h[5]-h[3]); }
     CK(cudaGraphLaunch(gb_, st_));
     if (want == 2) { CK(cudaMemcpyAsync(hxn_, xn_, (size_t)d_ * 4, cudaMemcpyDeviceToHost, st_)); CK(cudaStreamSynchronize(st_)); pending_ = 0; return hxn_; }
     CK(cudaMemcpyAsync(hlog_, logits_, (size_t)V_ * 4, cudaMemcpyDeviceToHost, st_)); CK(cudaStreamSynchronize(st_)); pending_ = 0;
@@ -350,8 +453,8 @@ class LlamaCuda : public Model {
   }
   size_t smem_for(int cols) const { return 2 * (size_t)cols + (size_t)cols / 32 * 8; }
 
-  void mv(cudaStream_t s, const DMat *m, const float *const *bias, float *const *out, int nm, int ai, float *resid) {
-    MvArgs a{}; a.nm = nm; a.cols = m[0].cols; a.xq = aq_[ai]; a.xs = as_[ai]; a.xsum = asum_[ai]; a.resid = resid; int tot = 0;
+  void mv(cudaStream_t s, const DMat *m, const float *const *bias, float *const *out, int nm, int ai, int np, float *resid, const __half *pfk = nullptr, const __half *pfv = nullptr) {
+    MvArgs a{}; if (pfk && !getenv("QPACK_CUDA_NOPF")) { a.ctl = ctl_; a.pfk = (const char *)pfk; a.pfv = (const char *)pfv; a.kvd = kvd_; } a.nm = nm; a.cols = m[0].cols; a.np = np; a.xq = aq_[ai]; a.xs = as_[ai]; a.xsum = asum_[ai]; a.resid = resid; int tot = 0;
     for (int i = 0; i < nm; i++) { a.m[i] = m[i]; a.bias[i] = bias ? bias[i] : nullptr; a.out[i] = out ? out[i] : nullptr; a.rowstart[i] = tot; tot += m[i].rows; }
     a.rowstart[nm] = tot;
     switch (wpb_) {
@@ -361,8 +464,9 @@ class LlamaCuda : public Model {
       default: k_mv<8><<<(tot + 7) / 8, 256, smem_for(a.cols), s>>>(a);
     }
   }
-  void norm(cudaStream_t s, const float *w, int ai, float *yf) { k_norm_actq<<<1, 1024, 0, s>>>(x_, w, d_, eps_, aq_[ai], as_[ai], asum_[ai], yf); }
+  void norm(cudaStream_t s, const float *w, int ai, float *yf, int np) { k_norm_actq<<<1, 1024, 0, s>>>(x_, w, d_, eps_, aq_[ai], as_[ai], asum_[ai], yf, np); }
 
+  int P(int bit) const { return (p1mask_ >> bit) & 1 ? 1 : 2; }   // activation planes (1 or 2) of the vector produced at stage `bit`
   void build_graphs() {
     const float scl = 1.f / std::sqrt((float)hd_); const int rep = nh_ / nkv_;
     cudaStream_t s = st_;
@@ -371,37 +475,45 @@ class LlamaCuda : public Model {
     k_embed<<<1, 256, 0, s>>>(embed_, ctl_, x_);
     for (int l = 0; l < L_; l++) {
       const Layer &ly = layers_[l]; __half *kl = kc_ + (size_t)l * ctx_ * kvd_, *vl = vc_ + (size_t)l * ctx_ * kvd_;
-      norm(s, ly.an, 0, nullptr);
-      { DMat m[3] = {ly.wq, ly.wk, ly.wv}; const float *b[3] = {ly.bq, ly.bk, ly.bv}; float *o[3] = {q_, k_, v_}; mv(s, m, b, o, 3, 0, nullptr); }
-      if (hd_ == 64) k_attn<64><<<dim3(nkv_, nch_), 64, 0, s>>>(q_, k_, v_, cos_, sin_, kl, vl, part_, ctl_, rep, nkv_, nch_, scl, dbg_);
-      else k_attn<128><<<dim3(nkv_, nch_), 128, 0, s>>>(q_, k_, v_, cos_, sin_, kl, vl, part_, ctl_, rep, nkv_, nch_, scl, dbg_);
-      if (hd_ == 64) k_merge<64><<<nh_, 64, 0, s>>>(part_, ctl_, nch_, aq_[0], as_[0], asum_[0]);
-      else k_merge<128><<<nh_, 128, 0, s>>>(part_, ctl_, nch_, aq_[0], as_[0], asum_[0]);
-      { DMat m[1] = {ly.wo}; mv(s, m, nullptr, nullptr, 1, 0, x_); }
-      norm(s, ly.fn, 0, nullptr);
+      norm(s, ly.an, 0, nullptr, P(0));
+      { DMat m[3] = {ly.wq, ly.wk, ly.wv}; const float *b[3] = {ly.bq, ly.bk, ly.bv}; float *o[3] = {q_, k_, v_}; mv(s, m, b, o, 3, 0, P(0), nullptr, kl, vl); }
+      for (int rpt = 0; rpt < (dbg_ == 8 ? 2 : 1); rpt++)
+      if (hd_ == 64) k_attn<64><<<dim3(nkv_, nch_), ANT, 0, s>>>(q_, k_, v_, cos_, sin_, kl, vl, part_, ctl_, rep, nkv_, nch_, scl, dbg_);
+      else k_attn<128><<<dim3(nkv_, nch_), ANT, 0, s>>>(q_, k_, v_, cos_, sin_, kl, vl, part_, ctl_, rep, nkv_, nch_, scl, dbg_);
+      if (hd_ == 64) k_merge<64><<<nh_, 64, 0, s>>>(part_, ctl_, nch_, aq_[0], as_[0], asum_[0], P(2));
+      else k_merge<128><<<nh_, 128, 0, s>>>(part_, ctl_, nch_, aq_[0], as_[0], asum_[0], P(2));
+      { DMat m[1] = {ly.wo}; mv(s, m, nullptr, nullptr, 1, 0, P(2), x_); }
+      norm(s, ly.fn, 0, nullptr, P(1));
       switch (gu_nw_) {
-        case 8: k_gateup<8><<<ff_ / 32, 8 * 32, smem_for(d_), s>>>(ly.wg, ly.wu, aq_[0], as_[0], asum_[0], aq_[1], as_[1], asum_[1]); break;
-        case 16: k_gateup<16><<<ff_ / 32, 16 * 32, smem_for(d_), s>>>(ly.wg, ly.wu, aq_[0], as_[0], asum_[0], aq_[1], as_[1], asum_[1]); break;
-        default: k_gateup<32><<<ff_ / 32, 32 * 32, smem_for(d_), s>>>(ly.wg, ly.wu, aq_[0], as_[0], asum_[0], aq_[1], as_[1], asum_[1]);
+        case 8: k_gateup<8><<<ff_ / 32, 8 * 32, smem_for(d_), s>>>(ly.wg, ly.wu, aq_[0], as_[0], asum_[0], aq_[1], as_[1], asum_[1], P(1), P(3)); break;
+        case 16: k_gateup<16><<<ff_ / 32, 16 * 32, smem_for(d_), s>>>(ly.wg, ly.wu, aq_[0], as_[0], asum_[0], aq_[1], as_[1], asum_[1], P(1), P(3)); break;
+        default: k_gateup<32><<<ff_ / 32, 32 * 32, smem_for(d_), s>>>(ly.wg, ly.wu, aq_[0], as_[0], asum_[0], aq_[1], as_[1], asum_[1], P(1), P(3));
       }
-      { DMat m[1] = {ly.wd}; mv(s, m, nullptr, nullptr, 1, 1, x_); }
+      { DMat m[1] = {ly.wd}; mv(s, m, nullptr, nullptr, 1, 1, P(3), x_); }
     }
     cudaGraph_t ga; CK(cudaStreamEndCapture(s, &ga)); CK(cudaGraphInstantiate(&ga_, ga, nullptr, nullptr, 0)); CK(cudaGraphDestroy(ga));
     CK(cudaStreamBeginCapture(s, cudaStreamCaptureModeGlobal));
-    norm(s, fnorm_, 0, xn_);
-    { DMat m[1] = {head_}; float *o[1] = {logits_}; mv(s, m, nullptr, o, 1, 0, nullptr); }
+    norm(s, fnorm_, 0, xn_, P(4));
+    { DMat m[1] = {head_}; float *o[1] = {logits_}; mv(s, m, nullptr, o, 1, 0, P(4), nullptr); }
     cudaGraph_t gb; CK(cudaStreamEndCapture(s, &gb)); CK(cudaGraphInstantiate(&gb_, gb, nullptr, nullptr, 0)); CK(cudaGraphDestroy(gb));
+    CK(cudaStreamBeginCapture(s, cudaStreamCaptureModeGlobal));   // greedy tail: final norm, head, device argmax (advances ctl)
+    norm(s, fnorm_, 0, nullptr, P(4));
+    { DMat m[1] = {head_}; float *o[1] = {logits_}; mv(s, m, nullptr, o, 1, 0, P(4), nullptr); }
+    k_argmax1<<<AM_BLOCKS, 1024, 0, s>>>(logits_, V_, amv_, ami_); k_argmax2<<<1, 64, 0, s>>>(amv_, ami_, ctl_, out_);
+    cudaGraph_t gc; CK(cudaStreamEndCapture(s, &gc)); CK(cudaGraphInstantiate(&gc_, gc, nullptr, nullptr, 0)); CK(cudaGraphDestroy(gc));
   }
 
   const int wpb_ = getenv("QPACK_CUDA_WPB") ? atoi(getenv("QPACK_CUDA_WPB")) : 8;
+  const int p1mask_ = getenv("QPACK_CUDA_P1") ? atoi(getenv("QPACK_CUDA_P1")) : 0;
   const int dbg_ = getenv("QPACK_CUDA_DBG") ? atoi(getenv("QPACK_CUDA_DBG")) : 0;
   const int gu_nw_ = getenv("QPACK_CUDA_GU") ? atoi(getenv("QPACK_CUDA_GU")) : 32;
   int d_, L_, nh_, nkv_, hd_, ff_, V_, ctx_, kvd_, qd_, nch_, pos_ = 0, slot_ = 0, pending_ = 0; float eps_;
-  cudaStream_t st_ = nullptr; cudaGraphExec_t ga_ = nullptr, gb_ = nullptr;
+  cudaStream_t st_ = nullptr; cudaGraphExec_t ga_ = nullptr, gb_ = nullptr, gc_ = nullptr;
   DMat embed_{}, head_{}; const float *fnorm_ = nullptr; std::vector<Layer> layers_; std::vector<void *> allocs_;
-  __half *kc_ = nullptr, *vc_ = nullptr;
+  __half *kc_ = nullptr, *vc_ = nullptr; void *arena_ = nullptr;
+  float *amv_; int *ami_, *out_;
   float *x_, *q_, *k_, *v_, *xn_, *logits_, *part_, *cos_, *sin_, *as_[2]; int8_t *aq_[2]; int *asum_[2];
-  Ctl *ctl_, *hctl_; float *hlog_, *hxn_;
+  Ctl *ctl_, *hctl_; float *hlog_, *hxn_; int *hout_;
 };
 
 }  // namespace

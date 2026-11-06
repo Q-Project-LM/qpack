@@ -36,6 +36,14 @@ int main(int argc, char **argv) {
       cases++; top1 += last_ok; maxd = std::max(maxd, cmax);
       printf("%s: %zu tokens, final-position top-1 %s, max |dlogit| %.4f\n", f.c_str(), ids.size(), last_ok ? "equal" : "DIFFERENT", cmax);
     }
+    if (!files.empty()) {   // greedy continuation: CPU engine vs device-side argmax chain
+      std::ifstream in(files[0], std::ios::binary); std::stringstream ss; ss << in.rdbuf();
+      auto ids = cpu.tok().encode(ss.str()); if (ids.size() > 32) ids.resize(32);
+      cpu.model().reset(); gpu->reset(); for (size_t i = 0; i + 1 < ids.size(); i++) { cpu.model().step(ids[i], 0); gpu->step(ids[i], 0); }
+      std::vector<int> a(40), b(40); cpu.model().greedy_run(ids.back(), 40, a.data()); gpu->greedy_run(ids.back(), 40, b.data());
+      int same = 0; while (same < 40 && a[same] == b[same]) same++;
+      printf("greedy_run: first %d of 40 tokens identical (CPU vs CUDA device argmax)\n", same);
+    }
     printf("cases %d/%d top-1 equal at last position; all positions %d/%d top-1 equal; max |dlogit| %.4f, mean |dlogit| %.5f\n", top1, cases, pos_ok, pos_all, maxd, sumd / cnt);
   } catch (const std::exception &e) { fprintf(stderr, "error: %s\n", e.what()); return 1; }
 }

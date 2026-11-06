@@ -123,6 +123,15 @@ class Model {
   virtual const float *prefill(const int *tokens, int n, int want = 1) {
     const float *r = nullptr; for (int i = 0; i < n; i++) r = step(tokens[i], i + 1 == n ? want : 0); return r;
   }
+  // n greedy (argmax) tokens starting from `token`, token i+1 = argmax of the logits after token i; out[i] = the argmax after
+  // feeding token i. The CUDA backend does this on the device without a host round trip per token.
+  virtual int greedy_run(int token, int n, int *out) {
+    for (int i = 0; i < n; i++) {
+      const float *l = step(token, 1); int b = 0; for (int v = 1; v < vocab(); v++) if (l[v] > l[b]) b = v;
+      out[i] = token = b;
+    }
+    return n;
+  }
   virtual void reset() = 0;
   // n tokens at once with the logits of every position (n x vocab) — verification of speculative tokens
   virtual void prefill_all(const int *tokens, int n, float *logits) {   // callers hold ExactBatches for bit-exact results
