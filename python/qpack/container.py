@@ -223,10 +223,8 @@ class StreamWriter:
         if self.done > self.plan[self.i][1]: raise ValueError(f"blob {name}: more bytes than planned")
 
     def _next(self):
-        pad = (-self.done) % ALIGN if False else 0
         end = self.offs[self.i] + self.plan[self.i][1]; self.i += 1; self.done = 0
-        nxt = self.offs[self.i] if self.i < len(self.plan) else self.end
-        self.f.write(b"\0" * (nxt - end))
+        if self.i < len(self.plan): self.f.write(b"\0" * (self.offs[self.i] - end))
 
     def close(self):
         while self.i < len(self.plan):

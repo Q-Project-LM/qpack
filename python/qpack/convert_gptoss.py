@@ -86,9 +86,12 @@ def mx4_rows(blocks, scales):
     return (nib[..., :16] | (nib[..., 16:] << 4)).astype(np.uint8).tobytes(), np.ascontiguousarray(scales).tobytes()
 
 
+_PAIR = np.stack([MX4_LUT[np.arange(256) & 15], MX4_LUT[np.arange(256) >> 4]], axis=-1).astype(np.float32)   # [256, 2]
+
+
 def dq_mx4_rows(blocks, scales):
     """HF mxfp4 rows -> float32 [R, C]"""
-    v = np.stack([MX4_LUT[blocks & 15], MX4_LUT[blocks >> 4]], axis=-1).reshape(blocks.shape[0], blocks.shape[1], 32)
+    v = _PAIR[blocks].reshape(blocks.shape[0], blocks.shape[1], 32)   # byte -> (low, high) value pair, in HF order
     return (v * np.ldexp(np.float32(1), scales.astype(np.int32) - 127)[..., None]).reshape(blocks.shape[0], -1)
 
 
@@ -190,7 +193,17 @@ def emit_rows(w, kind, bid, ext, x, scales):
         d, s_ = {"q8": q8_rows, "q4": q4_rows, "q1": q1_rows}[kind](np.ascontiguousarray(x, np.float32)); w.write(bid + ext, d); scales.append(s_)
 
 
+def patch_selftest(path, ref_json):
+    """overwrite the (padded) selftest.json blob of an existing container with ref_json (must fit)"""
+    from .container import Container
+    c = Container(path); off, ln = c.toc["selftest.json"]; c.close()
+    data = open(ref_json, "rb").read()
+    if len(data) > ln: raise SystemExit(f"selftest ({len(data)} bytes) does not fit the reserved {ln}")
+    with open(path, "r+b") as f: f.seek(off); f.write(data.ljust(ln, b" "))
+
+
 def main():
+    if len(sys.argv) == 4 and sys.argv[1] == "--patch-selftest": return patch_selftest(sys.argv[2], sys.argv[3])
     ap = argparse.ArgumentParser()
     ap.add_argument("src"); ap.add_argument("out")
     ap.add_argument("--experts", default="mxfp4", choices=["mxfp4", "q8", "q4", "q1"])
@@ -207,7 +220,8 @@ def main():
              "tokenizer.json": open(os.path.join(args.src, "tokenizer.json"), "rb").read()}
     gp = os.path.join(args.src, "generation_config.json")
     if os.path.exists(gp): extra["generation_config.json"] = open(gp, "rb").read()
-    if args.selftest: extra["selftest.json"] = open(args.selftest, "rb").read()
+    # selftest.json: embedded now, or a padded placeholder that `python -m qpack.convert_gptoss --patch-selftest file.qpack ref.json` overwrites in place
+    extra["selftest.json"] = open(args.selftest, "rb").read() if args.selftest else b'{"cases":[]}'.ljust(32768, b" ")
     plan = [(n, len(b)) for n, b in extra.items()] + plan
     t0 = time.time(); w = StreamWriter(args.out, plan)
     for n, b in extra.items(): w.write(n, b)
