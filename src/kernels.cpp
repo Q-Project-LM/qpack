@@ -51,7 +51,7 @@ static void rows_any(const Tensor &W, const float *x, const int16_t *xp, const f
 
 void matvec_n(const Tensor *const *W, int nw, const float *x, float *const *y, int cols) {
   if (nw == 1) { matvec(*W[0], x, y[0], (int)W[0]->rows(), cols); return; }
-  int total = 0, start[8]; bool quant = false;
+  int total = 0, start[10]; bool quant = false;
   for (int i = 0; i < nw; i++) {
     if (g_act_hook) g_act_hook(*W[i], x, 1, cols, cols);
     start[i] = total; total += (int)W[i]->rows(); quant |= W[i]->kind == Kind::Q8 || W[i]->kind == Kind::Q4 || W[i]->kind == Kind::Q1 || W[i]->kind == Kind::Mxfp4 || W[i]->kind == Kind::Q8G;

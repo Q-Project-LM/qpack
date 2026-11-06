@@ -34,7 +34,7 @@ Tensor expert_view(const Tensor &W, int e, int E) {
 
 struct Layer {
   const Tensor *an, *fn, *wq, *wk, *wv, *wo, *bq, *bk, *bv, *bo, *sinks, *rw, *rb, *bgu, *bd;
-  std::vector<Tensor> gu, dn;   // per-expert views
+  std::vector<std::vector<Tensor>> gu, dn;   // per-expert views (1, or 2 residual planes whose products are added)
   bool sliding;
 };
 
@@ -58,15 +58,34 @@ class GptOss : public Model {
       ly.an = g("attn_norm"); ly.fn = g("ffn_norm"); ly.wq = g("wq"); ly.wk = g("wk"); ly.wv = g("wv"); ly.wo = g("wo");
       ly.bq = g("bq"); ly.bk = g("bk"); ly.bv = g("bv"); ly.bo = g("bo"); ly.sinks = g("sinks"); ly.rw = g("router_w"); ly.rb = g("router_b");
       ly.bgu = g("b_gate_up"); ly.bd = g("b_down");
-      const Tensor *gu = g("w_gate_up"), *dn = g("w_down");
-      for (int e = 0; e < E_; e++) { ly.gu.push_back(expert_view(*gu, e, E_)); ly.dn.push_back(expert_view(*dn, e, E_)); }
+      // experts: all in w_gate_up / w_down (any kind), or -- config "moe_exact": {"<layer>": [ids]} -- the listed ones in the extra tensors
+      // w_gate_up_x / w_down_x (typically mxfp4, in listed order) and the others, in ascending order, in w_gate_up / w_down (typically q1),
+      // optionally with a second residual q1 plane in w_gate_up_r2 / w_down_r2 whose product is added
+      const std::string ls = std::to_string(l); const Json &mx = cfg_["moe_exact"];
+      std::vector<int> exact; if (mx.has(ls)) for (auto &x : mx[ls].arr) exact.push_back((int)x.as_int());
+      const Tensor *gu = g("w_gate_up"), *dn = g("w_down"), *gur = c->get("layers." + ls + ".w_gate_up_r2"), *dnr = c->get("layers." + ls + ".w_down_r2");
+      const Tensor *gux = c->get("layers." + ls + ".w_gate_up_x"), *dnx = c->get("layers." + ls + ".w_down_x");
+      const int nq = E_ - (int)exact.size(); int iq = 0;
+      for (int e = 0; e < E_; e++) {
+        auto it = std::find(exact.begin(), exact.end(), e);
+        if (it != exact.end()) {
+          if (!gux || !dnx) throw std::runtime_error("gptoss: exact experts listed without w_gate_up_x / w_down_x in layer " + ls);
+          const int j = (int)(it - exact.begin());
+          ly.gu.push_back({expert_view(*gux, j, (int)exact.size())}); ly.dn.push_back({expert_view(*dnx, j, (int)exact.size())});
+        } else {
+          ly.gu.push_back({expert_view(*gu, iq, nq)}); ly.dn.push_back({expert_view(*dn, iq, nq)});
+          if (gur) ly.gu.back().push_back(expert_view(*gur, iq, nq));
+          if (dnr) ly.dn.back().push_back(expert_view(*dnr, iq, nq));
+          iq++;
+        }
+      }
       ly.sliding = lt.type == Json::Array && l < (int)lt.arr.size() ? lt.arr[l].as_str() == "sliding_attention" : (l % 2 == 0);
       layers_.push_back(std::move(ly));
     }
     kvd_ = nkv_ * hd_;
     kc_.assign((size_t)L_ * ctx_ * kvd_, 0); vc_.assign((size_t)L_ * ctx_ * kvd_, 0);   // fp16 K/V cache
     x_.resize(d_); xn_.resize(d_); q_.resize(nh_ * hd_); k_.resize(kvd_); v_.resize(kvd_); att_.resize(nh_ * hd_); o_.resize(d_); logits_.resize(V_);
-    rl_.resize(E_); gub_.resize((size_t)K_ * 2 * ff_); hb_.resize((size_t)K_ * ff_); eo_.resize(d_);
+    rl_.resize(E_); gub_.resize((size_t)K_ * 2 * ff_); gub2_.resize((size_t)K_ * 2 * ff_); eo2_.resize(d_); hb_.resize((size_t)K_ * ff_); eo_.resize(d_);
     // YaRN (see the reference torch model): inv_freq blends interpolation and extrapolation by a ramp over the dimension index
     const double theta = cfg_["rope_theta"].as_num(150000), factor = cfg_["rope_scaling"]["factor"].as_num(1);
     const double orig = cfg_["rope_scaling"]["original_max_position_embeddings"].as_num(4096), beta_fast = cfg_["rope_scaling"]["beta_fast"].as_num(32), beta_slow = cfg_["rope_scaling"]["beta_slow"].as_num(1);
@@ -205,13 +224,22 @@ class GptOss : public Model {
       rmsnorm(x_.data(), ly.fn->f32(), d_, eps_, xn_.data());
       matvec(*ly.rw, xn_.data(), rl_.data(), E_, d_); for (int e = 0; e < E_; e++) rl_[e] += ly.rb->f32()[e];
       int idx[8]; float rw[8]; route(rl_.data(), idx, rw); capture(l, pos_, xn_.data(), idx, rw);
-      { const Tensor *w[8]; float *o[8]; for (int k = 0; k < K_; k++) { w[k] = &ly.gu[idx[k]]; o[k] = gub_.data() + (size_t)k * 2 * ff_; } matvec_n(w, K_, xn_.data(), o, d_); }
+      {
+        const Tensor *w[8]; float *o[8]; int nw = 0, slot[8], np[8];   // one output slot per (expert, plane); plane 2 is added to plane 1
+        for (int k = 0; k < K_; k++) {
+          np[k] = (int)ly.gu[idx[k]].size(); slot[k] = nw;
+          for (int p = 0; p < np[k]; p++) { w[nw] = &ly.gu[idx[k]][p]; o[nw] = p == 0 ? gub_.data() + (size_t)k * 2 * ff_ : gub2_.data() + (size_t)k * 2 * ff_; nw++; }
+        }
+        matvec_n(w, nw, xn_.data(), o, d_);
+        for (int k = 0; k < K_; k++) if (np[k] > 1) { float *y = gub_.data() + (size_t)k * 2 * ff_; const float *y2 = gub2_.data() + (size_t)k * 2 * ff_; for (int i = 0; i < 2 * ff_; i++) y[i] += y2[i]; }
+      }
       std::fill(eo_.begin(), eo_.end(), 0.f);
       for (int k = 0; k < K_; k++) {
         float *y = gub_.data() + (size_t)k * 2 * ff_; const float *b = ly.bgu->f32() + (size_t)idx[k] * 2 * ff_;
         for (int i = 0; i < 2 * ff_; i++) y[i] += b[i];
         float *h = hb_.data() + (size_t)k * ff_; swiglu(y, h, ff_);
-        matvec(ly.dn[idx[k]], h, o_.data(), d_, ff_);
+        matvec(ly.dn[idx[k]][0], h, o_.data(), d_, ff_);
+        if (ly.dn[idx[k]].size() > 1) { matvec(ly.dn[idx[k]][1], h, eo2_.data(), d_, ff_); for (int i = 0; i < d_; i++) o_[i] += eo2_[i]; }
         const float *bd = ly.bd->f32() + (size_t)idx[k] * d_;
         for (int i = 0; i < d_; i++) eo_[i] += rw[k] * (o_[i] + bd[i]);
       }
@@ -287,10 +315,18 @@ class GptOss : public Model {
           const int ne = (int)asg[e].size(); if (!ne) continue;
           eX_.resize((size_t)ne * d_); eG_.resize((size_t)ne * 2 * ff_); eH_.resize((size_t)ne * ff_); eY_.resize((size_t)ne * d_);
           for (int j = 0; j < ne; j++) memcpy(eX_.data() + (size_t)j * d_, bXN_.data() + (size_t)asg[e][j].first * d_, 4 * d_);
-          matmul(ly.gu[e], eX_.data(), ne, d_, eG_.data(), 2 * ff_, 2 * ff_, d_);
+          matmul(ly.gu[e][0], eX_.data(), ne, d_, eG_.data(), 2 * ff_, 2 * ff_, d_);
+          if (ly.gu[e].size() > 1) {
+            eG2_.resize((size_t)ne * 2 * ff_); matmul(ly.gu[e][1], eX_.data(), ne, d_, eG2_.data(), 2 * ff_, 2 * ff_, d_);
+            for (size_t i = 0; i < (size_t)ne * 2 * ff_; i++) eG_[i] += eG2_[i];
+          }
           const float *bg = ly.bgu->f32() + (size_t)e * 2 * ff_;
           pool().parallel_for(ne, [&](int a, int b) { for (int j = a; j < b; j++) { float *y = eG_.data() + (size_t)j * 2 * ff_; for (int i = 0; i < 2 * ff_; i++) y[i] += bg[i]; swiglu(y, eH_.data() + (size_t)j * ff_, ff_); } }, 1);
-          matmul(ly.dn[e], eH_.data(), ne, ff_, eY_.data(), d_, d_, ff_);
+          matmul(ly.dn[e][0], eH_.data(), ne, ff_, eY_.data(), d_, d_, ff_);
+          if (ly.dn[e].size() > 1) {
+            eY2_.resize((size_t)ne * d_); matmul(ly.dn[e][1], eH_.data(), ne, ff_, eY2_.data(), d_, d_, ff_);
+            for (size_t i = 0; i < (size_t)ne * d_; i++) eY_[i] += eY2_[i];
+          }
           const float *bd = ly.bd->f32() + (size_t)e * d_;
           for (int j = 0; j < ne; j++) { float *o = bO_.data() + (size_t)asg[e][j].first * d_; const float w = asg[e][j].second, *y = eY_.data() + (size_t)j * d_; for (int i = 0; i < d_; i++) o[i] += w * (y[i] + bd[i]); }
         }
@@ -320,7 +356,7 @@ class GptOss : public Model {
   int d_, L_, nh_, nkv_, hd_, ff_, V_, E_, K_, ctx_, kvd_, window_, pos_ = 0; float eps_, limit_, alpha_; double conc_;
   const Tensor *embed_, *head_, *fnorm_; std::vector<Layer> layers_;
   std::vector<uint16_t> kc_, vc_; std::vector<double> inv_;
-  std::vector<float> x_, xn_, q_, k_, v_, att_, o_, logits_, rl_, gub_, hb_, eo_;
+  std::vector<float> x_, xn_, q_, k_, v_, att_, o_, logits_, rl_, gub_, gub2_, hb_, eo_, eo2_, eG2_, eY2_;
   std::vector<float> bX_, bXN_, bQ_, bK_, bV_, bA_, bO_, bR_, eX_, eG_, eH_, eY_;
 };
 

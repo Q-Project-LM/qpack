@@ -117,7 +117,7 @@ def blob_sizes(kind, R, C):
 EXT = {"f32": ".f32", "f16": ".f16", "q8": ".q8", "q8g": ".q8g", "q4": ".q4", "q1": ".q1", "mxfp4": ".mx4"}
 
 
-def build(args):
+def build(args, spec_hook=None):
     st = SafeTensors(sorted(glob.glob(os.path.join(args.src, "model-*.safetensors")) or glob.glob(os.path.join(args.src, "*.safetensors"))))
     cfg = json.load(open(os.path.join(args.src, "config.json"))); L = args.layers or cfg["num_hidden_layers"]
     specs = []   # (canonical name, kind, shape [E?, R, C], source producer id)
@@ -140,6 +140,7 @@ def build(args):
             add(o + "b_" + n[2:], "f32", st.shape(p + f"mlp.experts.{h}_bias"), ("dense", p + f"mlp.experts.{h}_bias"))
     add("final_norm", "f32", st.shape("model.norm.weight"), ("dense", "model.norm.weight"))
     add("lm_head", args.head or args.embed, st.shape("lm_head.weight"), ("dense", "lm_head.weight"))
+    if spec_hook: specs = spec_hook(specs, st, L)
     plan, man = [], []
     for k, s in enumerate(specs):
         shp = s["shape"]; C = shp[-1] if len(shp) > 1 else 1; R = int(np.prod(shp[:-1])) if len(shp) > 1 else 1
