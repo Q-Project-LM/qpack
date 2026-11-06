@@ -658,6 +658,45 @@ class GptOssCuda : public Model {
 
 }  // namespace
 
+// expert matvec microbenchmark: 32 distinct synthetic experts of a layer (gate_up 5760x2880 + down 2880x2880), 4 per launch, rotating selections
+void cuda_gptoss_bench(FILE *out) {
+  const int E = 32, d = 2880, ff = 2880, units = 90; cudaStream_t st; CK(cudaStreamCreate(&st)); cudaEvent_t e0, e1; CK(cudaEventCreate(&e0)); CK(cudaEventCreate(&e1));
+  int8_t *aq; float *as, *ye, *hs, *wt, *bgu, *bd; int *asum, *hsum, *sel; int8_t *hq;
+  CK(cudaMalloc(&aq, ABYTES)); CK(cudaMalloc(&as, UMAX * 4)); CK(cudaMalloc(&asum, UMAX * 4)); CK(cudaMalloc(&hq, NK * ABYTES)); CK(cudaMalloc(&hs, NK * UMAX * 4)); CK(cudaMalloc(&hsum, NK * UMAX * 4));
+  CK(cudaMalloc(&ye, NK * d * 4)); CK(cudaMalloc(&wt, 16)); CK(cudaMalloc(&bgu, (size_t)E * 2 * ff * 4)); CK(cudaMalloc(&bd, (size_t)E * d * 4)); CK(cudaMalloc(&sel, 8 * NK * 4));
+  CK(cudaMemset(aq, 0x11, ABYTES)); CK(cudaMemset(bgu, 0, (size_t)E * 2 * ff * 4)); CK(cudaMemset(bd, 0, (size_t)E * d * 4)); CK(cudaMemset(hq, 0x11, NK * ABYTES));
+  { std::vector<float> f(UMAX, 1e-4f); CK(cudaMemcpy(as, f.data(), UMAX * 4, cudaMemcpyHostToDevice)); CK(cudaMemcpy(hs, std::vector<float>(NK * UMAX, 1e-4f).data(), NK * UMAX * 4, cudaMemcpyHostToDevice)); float w[4] = {.25f, .25f, .25f, .25f}; CK(cudaMemcpy(wt, w, 16, cudaMemcpyHostToDevice)); }
+  CK(cudaMemset(asum, 0, UMAX * 4)); CK(cudaMemset(hsum, 0, NK * UMAX * 4));
+  { int h[32]; for (int i = 0; i < 8; i++) for (int k = 0; k < 4; k++) h[i * 4 + k] = (i * 4 + k) % E; CK(cudaMemcpy(sel, h, sizeof h, cudaMemcpyHostToDevice)); }
+  struct V { const char *n; int kind, np; } vs[] = {{"mxfp4", 0, 1}, {"q1", 1, 1}, {"q1+r2", 1, 2}};
+  fprintf(out, "%-8s %-8s %10s %9s %8s %7s\n", "fmt", "matrix", "MB/launch", "us", "GB/s", "%150");
+  for (auto &v : vs) for (int mt = 0; mt < 2; mt++) {
+    const size_t R = mt == 0 ? 2 * ff : d, C = 2880, G = (C + 127) / 128;
+    const size_t qb = v.kind == 0 ? R * C / 2 : R * G * 16, sb = v.kind == 0 ? R * C / 32 : R * G * 2;
+    std::vector<ExpD> tab(E); std::vector<void *> mem;
+    for (int e = 0; e < E; e++) {
+      ExpD D{}; D.kind = v.kind; D.np = v.np;
+      for (int p = 0; p < v.np; p++) {
+        void *q, *sc; CK(cudaMalloc(&q, qb)); CK(cudaMalloc(&sc, sb)); CK(cudaMemset(q, 0x5a + e + p, qb)); CK(cudaMemset(sc, v.kind == 0 ? 0x7c : 0x04, sb)); mem.push_back(q); mem.push_back(sc);
+        if (mt == 0) { D.gq[p] = q; D.gs[p] = sc; } else { D.dq[p] = q; D.ds[p] = sc; }
+      }
+      tab[e] = D;
+    }
+    ExpD *dt; CK(cudaMalloc(&dt, sizeof(ExpD) * E)); CK(cudaMemcpy(dt, tab.data(), sizeof(ExpD) * E, cudaMemcpyHostToDevice));
+    auto run = [&](int i) {
+      if (mt == 0) k_gateup<<<dim3(ff / 32, NK), 256, 0, st>>>(dt, sel + 4 * (i & 7), bgu, 7.f, 1.702f, units, ff, (const int4 *)aq, as, asum, hq, hs, hsum);
+      else k_down<<<dim3(d / 8, NK), 256, 0, st>>>(dt, sel + 4 * (i & 7), wt, bd, units, d, (const int4 *)hq, hs, hsum, ye);
+    };
+    for (int i = 0; i < 300; i++) run(i);
+    CK(cudaStreamSynchronize(st)); float best = 1e9;
+    for (int rep = 0; rep < 5; rep++) { CK(cudaEventRecord(e0, st)); for (int i = 0; i < 16; i++) run(i); CK(cudaEventRecord(e1, st)); CK(cudaEventSynchronize(e1)); float ms; CK(cudaEventElapsedTime(&ms, e0, e1)); best = std::min(best, ms / 16); }
+    const double bytes = (double)NK * v.np * (qb + sb), us = best * 1e3, gbs = bytes / (us * 1e-6) / 1e9;
+    fprintf(out, "%-8s %-8s %10.2f %9.1f %8.1f %6.1f%%\n", v.n, mt == 0 ? "gate_up" : "down", bytes / 1048576.0, us, gbs, 100 * gbs / 150);
+    for (void *m : mem) cudaFree(m);
+    cudaFree(dt);
+  }
+}
+
 std::unique_ptr<Model> make_gptoss_cuda(std::shared_ptr<Container> c, int max_ctx) { return std::unique_ptr<Model>(new GptOssCuda(c, max_ctx)); }
 
 }  // namespace qp
