@@ -246,6 +246,7 @@ int main(int argc, char **argv) {
     else if (a == "--port") port = std::stoi(next());
     else if (a == "-c" || a == "--ctx") ctx = std::stoi(next());
     else if (a == "-t" || a == "--threads") qp::set_threads(std::stoi(next()));
+    else if (a == "--device") setenv("QPACK_DEVICE", next().c_str(), 1);
     else if (a == "-a" || a == "--alias") alias = next();
     else if (a == "--lookup") lookup = std::stoi(next());
     else if (a == "--draft") draft = next();

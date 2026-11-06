@@ -23,6 +23,7 @@ int main(int argc, char **argv) {
     else if (a == "-p" && i + 1 < argc) np = std::stoi(argv[++i]);
     else if (a == "-n" && i + 1 < argc) ng = std::stoi(argv[++i]);
     else if (a == "-t" && i + 1 < argc) threads = argv[++i];
+    else if (a == "--device" && i + 1 < argc) setenv("QPACK_DEVICE", argv[++i], 1);
     else if (a == "-r" && i + 1 < argc) reps = std::stoi(argv[++i]);
     else if (a == "--row") row = true;
     else if (a == "--spec" && i + 1 < argc) spec = argv[++i];

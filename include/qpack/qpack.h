@@ -148,6 +148,7 @@ class Model {
 // opens any supported .qpack; max_ctx = 0 picks a default (4096, or the model's limit if smaller)
 std::unique_ptr<Model> load_model(const std::string &path, int max_ctx = 0);
 std::unique_ptr<Model> make_llama(std::shared_ptr<Container> c, int max_ctx);
+std::unique_ptr<Model> make_llama_cuda(std::shared_ptr<Container> c, int max_ctx);   // only with -DQPACK_CUDA=ON; selected by QPACK_DEVICE=cuda
 std::unique_ptr<Model> make_lfm3(std::shared_ptr<Container> c, int max_ctx);
 std::unique_ptr<Model> make_nq(std::shared_ptr<Container> c, int max_ctx);
 
