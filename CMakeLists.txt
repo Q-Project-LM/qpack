@@ -31,7 +31,7 @@ if(QPACK_SIZE_OPT)
   endif()
 endif()
 
-add_library(qpack STATIC src/json.cpp src/container.cpp src/kernels.cpp src/kernels_x86.cpp src/kernels_neon.cpp src/threads.cpp src/model_llama.cpp src/model_lfm.cpp src/model_nq.cpp src/tokenizer.cpp src/unicode.cpp src/sampler.cpp src/chat.cpp src/circuits.cpp)
+add_library(qpack STATIC src/json.cpp src/container.cpp src/kernels.cpp src/kernels_x86.cpp src/kernels_neon.cpp src/threads.cpp src/model_llama.cpp src/model_lfm.cpp src/model_gptoss.cpp src/model_nq.cpp src/tokenizer.cpp src/unicode.cpp src/sampler.cpp src/chat.cpp src/circuits.cpp)
 if(QPACK_SIZE_OPT)
   file(GLOB _cold src/*.cpp)
   list(FILTER _cold EXCLUDE REGEX "kernels|model_|sampler|threads")   # hot paths stay -O3

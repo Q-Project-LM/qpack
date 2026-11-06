@@ -298,6 +298,29 @@ void row_q1_multi(const uint8_t *Q, const uint16_t *S, const int16_t *XQ, int ld
 void mm_q1(const uint8_t *Q, const uint16_t *S, const int16_t *XQ, const float *BS, int ldq, int nb, int B, float *Y, int ldy, int r0, int r1, int cols) {
   for (int r = r0; r < r1; r++) row_q1_multi(Q, S, XQ, ldq, BS, nb, Y, ldy, r, B, cols);
 }
+
+// mxfp4 (see kernels_impl.h): portable integer code like q1 -- the exact int32 group sum, then one float FMA per group in group
+// order; all entry points share row_mx4, so they are bit-identical to each other.
+static void row_mx4(const uint8_t *q, const uint8_t *s, const int16_t *x, const float *bs, int cols, float *out) {
+  const int G = cols / 32; float acc = 0;
+  for (int g = 0; g < G; g++) {
+    int32_t d = 0;
+    for (int c = 0; c < 32; c++) { const uint8_t b = q[16 * g + (c & 15)]; d += impl::kMx4Lut2[c < 16 ? (b & 15) : (b >> 4)] * xval(x, cols, 32 * g + c); }
+    acc = std::fmaf((float)d, impl::mx4_scale(s[g]) * bs[g >> 2], acc);
+  }
+  *out = acc;
+}
+void rows_mx4(const uint8_t *Q, const uint8_t *S, const int16_t *xq, const float *bs, float *y, int r0, int r1, int cols) {
+  const int G = cols / 32;
+  for (int r = r0; r < r1; r++) row_mx4(Q + (int64_t)r * G * 16, S + (int64_t)r * G, xq, bs, cols, y + r);
+}
+void row_mx4_multi(const uint8_t *Q, const uint8_t *S, const int16_t *XQ, int ldq, const float *BS, int nbs, float *Y, int ldy, int r, int nt, int cols) {
+  const int G = cols / 32;
+  for (int j = 0; j < nt; j++) row_mx4(Q + (int64_t)r * G * 16, S + (int64_t)r * G, XQ + (int64_t)j * ldq, BS + (int64_t)j * nbs, cols, Y + (int64_t)j * ldy + r);
+}
+void mm_mx4(const uint8_t *Q, const uint8_t *S, const int16_t *XQ, const float *BS, int ldq, int nb, int B, float *Y, int ldy, int r0, int r1, int cols) {
+  for (int r = r0; r < r1; r++) row_mx4_multi(Q, S, XQ, ldq, BS, nb, Y, ldy, r, B, cols);
+}
 }  // namespace impl
 
 // ---- elementwise

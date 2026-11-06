@@ -1,6 +1,6 @@
 // libqpack: load QPACK1/QPACK2 single-file models and run them on the CPU (AVX2/FMA or NEON, threads).
 //   Container  — mmap of a .qpack file: table of contents, manifest, tensors viewed in place (no copies).
-//   Tensor     — f32 / f16 / q8 (int8 rows + float32 per-row scale) / q4 (4-bit groups + fp16 scale) / q1 (sign bits, group 128 + fp16 scale) / i64, with matvec() kernels.
+//   Tensor     — f32 / f16 / q8 (int8 rows + float32 per-row scale) / q4 (4-bit groups + fp16 scale) / q1 (sign bits, group 128 + fp16 scale) / mxfp4 (E2M1 nibbles + e8m0 scale per 32) / i64, with matvec() kernels.
 //   Model      — one decode step at a time: Llama family (Llama, Qwen2, Mistral, SmolLM) and N-Q (Gated DeltaNet).
 #pragma once
 #include <cstdint>
@@ -31,7 +31,7 @@ ThreadPool &pool();             // process-wide pool (QPACK_THREADS env or hardw
 void set_threads(int n);         // call before the first pool() use
 
 // ------------------------------------------------------------------ container
-enum class Kind { F32, F16, Q8, Q4, Q1, I64, Tern5, Bits };
+enum class Kind { F32, F16, Q8, Q4, Q1, I64, Tern5, Bits, Mxfp4 };
 struct Tensor {
   std::string name;
   std::vector<int64_t> shape;
@@ -39,6 +39,7 @@ struct Tensor {
   const void *data = nullptr;          // points into the mmap (or into `owned`)
   const float *scale = nullptr;        // q8: one float32 per row
   const uint16_t *scale16 = nullptr;   // q4 / q1: one fp16 per group of `group` columns, row-major [rows, cols / group]
+  const uint8_t *scale8 = nullptr;     // mxfp4: one e8m0 byte (2^(e-127)) per group of 32 columns, row-major [rows, cols / 32]
   int group = 0;                       // q4 group size (32), q1 group size (128; see QPACK2.md): byte j of a group holds columns j (low nibble) and j + 16
                                        // (high nibble), each stored as q + 8 with q in [-8, 7]
   std::vector<int64_t> orig_shape;     // q1/q4/q8 tensors stored as [E, R, C]: the file's shape (`shape` is then [E*R, C])
@@ -149,6 +150,7 @@ class Model {
 std::unique_ptr<Model> load_model(const std::string &path, int max_ctx = 0);
 std::unique_ptr<Model> make_llama(std::shared_ptr<Container> c, int max_ctx);
 std::unique_ptr<Model> make_lfm3(std::shared_ptr<Container> c, int max_ctx);
+std::unique_ptr<Model> make_gptoss(std::shared_ptr<Container> c, int max_ctx);
 std::unique_ptr<Model> make_nq(std::shared_ptr<Container> c, int max_ctx);
 
 // self-test stored in the container: top-1 must match and the top-5 logits must agree within tol

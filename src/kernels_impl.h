@@ -29,6 +29,15 @@ void rows_q4(const uint8_t *Q, const uint16_t *S, const int16_t *xq, const float
 void rows_q1(const uint8_t *Q, const uint16_t *S, const int16_t *xq, const float *bs, float *y, int r0, int r1, int cols);
 void row_q1_multi(const uint8_t *Q, const uint16_t *S, const int16_t *XQ, int ldq, const float *BS, int nbs, float *Y, int ldy, int r, int nt, int cols);
 void mm_q1(const uint8_t *Q, const uint16_t *S, const int16_t *XQ, const float *BS, int ldq, int nb, int B, float *Y, int ldy, int r0, int r1, int cols);
+// mxfp4: 32-column groups of 16 bytes (byte j = column j in the low nibble, column j + 16 in the high one; nibble = sign bit 3 + E2M1
+// magnitude index) and one e8m0 scale byte per group (2^(e - 127)). kMx4Lut2 holds 2 x the E2M1 value, so a group's integer dot
+// product is exact and the group scale is 2^(e - 128) (mx4_scale).
+void rows_mx4(const uint8_t *Q, const uint8_t *S, const int16_t *xq, const float *bs, float *y, int r0, int r1, int cols);
+void row_mx4_multi(const uint8_t *Q, const uint8_t *S, const int16_t *XQ, int ldq, const float *BS, int nbs, float *Y, int ldy, int r, int nt, int cols);
+void mm_mx4(const uint8_t *Q, const uint8_t *S, const int16_t *XQ, const float *BS, int ldq, int nb, int B, float *Y, int ldy, int r0, int r1, int cols);
+alignas(16) static const int8_t kMx4Lut2[16] = {0, 1, 2, 3, 4, 6, 8, 12, 0, -1, -2, -3, -4, -6, -8, -12};
+// 2^(e - 128) as a float (exponent field e - 1; e < 2 flushes to 0)
+inline float mx4_scale(uint8_t e) { const uint32_t b = (uint32_t)(e > 1 ? e - 1 : 0) << 23; float f; __builtin_memcpy(&f, &b, 4); return f; }
 void row_q8_multi(const int8_t *Q, const float *scale, const int16_t *XQ, int ldq, const float *BS, int nbs, float *Y, int ldy, int r, int nt, int cols);
 void row_q4_multi(const uint8_t *Q, const uint16_t *S, const int16_t *XQ, int ldq, const float *BS, int nbs, float *Y, int ldy, int r, int nt, int cols);
 void mm_q8(const int8_t *Q, const float *scale, const int16_t *XQ, const float *BS, int ldq, int nb, int B, float *Y, int ldy, int r0, int r1, int cols);

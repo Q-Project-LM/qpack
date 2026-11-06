@@ -222,6 +222,7 @@ std::unique_ptr<Model> load_model(const std::string &path, int max_ctx) {
   auto c = std::make_shared<Container>(path);
   const std::string arch = c->config()["arch"].as_str(), mt = c->config()["model_type"].as_str();
   if (arch == "llama") return make_llama(c, max_ctx);
+  if (arch == "gptoss") return make_gptoss(c, max_ctx);
   if (arch == "lfm3") return make_lfm3(c, max_ctx);
   if (mt == "nq4") return make_nq(c, max_ctx);
   throw std::runtime_error("unsupported model in " + path + " (arch='" + arch + "', model_type='" + mt + "')");

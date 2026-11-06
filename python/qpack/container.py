@@ -14,6 +14,9 @@ Contents: manifest.json, config.json, generation_config.json, tokenizer.json, se
                1-bit   -> <id>.q1 + <id>.scale (sign bits, groups of 128 columns: 16 bytes per group, bit c of the group = column c
                           (LSB first), 1 => +1, 0 => -1; fp16 scale per group; W = (2b-1)*scale; the last partial group is
                           padded with 0 bits; manifest "group": 128; written by qpack-quantize --type q1)
+               mxfp4   -> <id>.mx4 + <id>.scale (OCP MXFP4, kept exactly: groups of 32 columns, 16 bytes per group, byte j = column j in the low
+                          nibble and column j + 16 in the high one; nibble = sign (bit 3) + E2M1 magnitude index into
+                          [0, .5, 1, 1.5, 2, 3, 4, 6]; one uint8 e8m0 scale per group, group value = lut * 2^(e - 127); manifest "group": 32)
                [E, R, C] tensors of any of these kinds are rows [E*R] x cols [C]
   1-D float tensors    -> <id>.f32    (norms, decay params, unigram prior: tiny, kept exact)
   everything else      -> <id>.f16 (default) or .f32 (--dense f32)
@@ -54,7 +57,7 @@ def write_container(path, blobs, magic=None):
         ent.append((n, off, len(blobs[n]))); off = (off + len(blobs[n]) + ALIGN - 1) // ALIGN * ALIGN
     with open(path, "wb") as o:
         if magic is None:   # QPACK2 as soon as the container holds int8 / int4 / 1-bit tensors, QPACK1 otherwise
-            magic = MAGIC2 if any(n.endswith((".q8", ".q4", ".q1")) for n in names) else MAGIC
+            magic = MAGIC2 if any(n.endswith((".q8", ".q4", ".q1", ".mx4")) for n in names) else MAGIC
         o.write(magic + struct.pack("<II", len(names), 0))
         for n, of, ln in ent: o.write(n.encode().ljust(56, b"\0") + struct.pack("<QQ", of, ln))
         for n, of, ln in ent:
@@ -110,6 +113,126 @@ def dequant_q4(data, scale, shape):
     q = np.concatenate([(b & 15).astype(np.int8) - 8, (b >> 4).astype(np.int8) - 8], axis=2).astype(np.float32)   # [rows, groups, 32]
     s = np.frombuffer(scale, dtype=np.float16).astype(np.float32).reshape(rows, cols // 32, 1)
     return np.ascontiguousarray((q * s).reshape(shape))
+
+
+MX4_LUT = np.array([0, .5, 1, 1.5, 2, 3, 4, 6, -0., -.5, -1, -1.5, -2, -3, -4, -6], dtype=np.float32)
+
+
+def dequant_mxfp4(data, scale, shape):
+    """mxfp4 blobs (see the module docstring) -> float32 array of `shape` ([rows, cols] or [E, R, C]), cols a multiple of 32."""
+    rows, cols = _rc(shape)
+    b = np.frombuffer(data, dtype=np.uint8).reshape(rows, cols // 32, 16)
+    v = np.concatenate([MX4_LUT[b & 15], MX4_LUT[b >> 4]], axis=2)   # [rows, groups, 32]
+    e = np.frombuffer(scale, dtype=np.uint8).reshape(rows, cols // 32, 1).astype(np.int32)
+    return np.ascontiguousarray((v * np.ldexp(np.float32(1), e - 127)).reshape(shape))
+
+
+class StreamWriter:
+    """Writes a QPACK container with bounded RAM. The table of contents is written first from a plan [(blob name, byte length)],
+    then the blobs are written in plan order, each in one or more write() calls (same file layout as write_container)."""
+
+    def __init__(self, path, plan, magic=MAGIC2):
+        self.plan = list(plan); head = 16 + 72 * len(self.plan); off = (head + ALIGN - 1) // ALIGN * ALIGN; self.offs = []
+        self.f = open(path, "wb"); self.f.write(magic + struct.pack("<II", len(self.plan), 0))
+        for n, ln in self.plan:
+            if len(n.encode()) > 55: raise ValueError("blob name too long: " + n)
+            self.f.write(n.encode().ljust(56, b"\0") + struct.pack("<QQ", off, ln)); self.offs.append(off); off = (off + ln + ALIGN - 1) // ALIGN * ALIGN
+        self.f.write(b"\0" * (self.offs[0] - self.f.tell()) if self.plan else b""); self.i = 0; self.done = 0
+
+    def write(self, name, data):
+        """append bytes to blob `name`: blobs must come in plan order, a new blob starts when the previous one is full"""
+        while self.i < len(self.plan) and self.done == self.plan[self.i][1] and self.plan[self.i][0] != name:
+            self._next()
+        if self.i >= len(self.plan) or self.plan[self.i][0] != name: raise ValueError(f"blob {name} written out of plan order (expected {self.plan[self.i][0] if self.i < len(self.plan) else None})")
+        mv = memoryview(data).cast("B"); self.f.write(mv); self.done += len(mv)
+        if self.done > self.plan[self.i][1]: raise ValueError(f"blob {name}: more bytes than planned")
+
+    def _next(self):
+        end = self.offs[self.i] + self.plan[self.i][1]; self.i += 1; self.done = 0
+        if self.i < len(self.plan): self.f.write(b"\0" * (self.offs[self.i] - end))
+
+    def close(self): self.mm.close(); self.f.close()
+
+
+def ternary_weight_names(model):
+    """state_dict names of the weights the model re-quantises to {-1,0,+1}*alpha on every forward"""
+    return {f"{n}.weight" for n, m in model.named_modules() if getattr(m, "ternary", False) and hasattr(m, "weight")}
+
+
+def quantize_q8(w):
+    """per-row symmetric int8: w ~= q * scale[row], q in [-127, 127]. Returns (int8 array, float32 scales)."""
+    a = w.detach().cpu().float().numpy().reshape(w.shape[0], -1)
+    scale = np.abs(a).max(1) / 127.0; scale[scale == 0] = 1.0
+    q = np.clip(np.rint(a / scale[:, None]), -127, 127).astype(np.int8)
+    return q, scale.astype(np.float32)
+
+
+def _rc(shape):
+    """(rows, cols) of a quantised tensor: [R, C] -> (R, C); [E, R, C] -> (E*R, C)"""
+    return int(np.prod(shape[:-1])), int(shape[-1])
+
+
+def dequant_q1(data, scale, shape):
+    """q1 blobs (see the module docstring) -> float32 array of `shape` ([rows, cols] or [E, R, C]); any cols (partial last group)."""
+    rows, cols = _rc(shape); G = (cols + 127) // 128
+    bits = np.unpackbits(np.frombuffer(data, dtype=np.uint8).reshape(rows, G * 16), axis=1, bitorder="little").reshape(rows, G * 128)
+    s = np.frombuffer(scale, dtype=np.float16).astype(np.float32).reshape(rows, G)
+    out = (bits.astype(np.float32) * 2 - 1) * np.repeat(s, 128, axis=1)
+    return np.ascontiguousarray(out[:, :cols].reshape(shape))
+
+
+def dequant_q4(data, scale, shape):
+    """q4 blobs (see the module docstring) -> float32 array of `shape` [rows, cols], cols a multiple of 32."""
+    rows, cols = _rc(shape)
+    b = np.frombuffer(data, dtype=np.uint8).reshape(rows, cols // 32, 16)
+    q = np.concatenate([(b & 15).astype(np.int8) - 8, (b >> 4).astype(np.int8) - 8], axis=2).astype(np.float32)   # [rows, groups, 32]
+    s = np.frombuffer(scale, dtype=np.float16).astype(np.float32).reshape(rows, cols // 32, 1)
+    return np.ascontiguousarray((q * s).reshape(shape))
+
+
+MX4_LUT = np.array([0, .5, 1, 1.5, 2, 3, 4, 6, -0., -.5, -1, -1.5, -2, -3, -4, -6], dtype=np.float32)
+
+
+def dequant_mxfp4(data, scale, shape):
+    """mxfp4 blobs (see the module docstring) -> float32 array of `shape` ([rows, cols] or [E, R, C]), cols a multiple of 32."""
+    rows, cols = _rc(shape)
+    b = np.frombuffer(data, dtype=np.uint8).reshape(rows, cols // 32, 16)
+    v = np.concatenate([MX4_LUT[b & 15], MX4_LUT[b >> 4]], axis=2)   # [rows, groups, 32]
+    e = np.frombuffer(scale, dtype=np.uint8).reshape(rows, cols // 32, 1).astype(np.int32)
+    return np.ascontiguousarray((v * np.ldexp(np.float32(1), e - 127)).reshape(shape))
+
+
+class StreamWriter:
+    """Writes a QPACK container with bounded RAM. The table of contents is written first from a plan [(blob name, byte length)],
+    then the blobs are written in plan order, each in one or more write() calls (same file layout as write_container)."""
+
+    def __init__(self, path, plan, magic=MAGIC2):
+        self.plan = list(plan); head = 16 + 72 * len(self.plan); off = (head + ALIGN - 1) // ALIGN * ALIGN; self.offs = []
+        self.f = open(path, "wb"); self.f.write(magic + struct.pack("<II", len(self.plan), 0))
+        for n, ln in self.plan:
+            if len(n.encode()) > 55: raise ValueError("blob name too long: " + n)
+            self.f.write(n.encode().ljust(56, b"\0") + struct.pack("<QQ", off, ln)); self.offs.append(off); off = (off + ln + ALIGN - 1) // ALIGN * ALIGN
+        self.f.write(b"\0" * (self.offs[0] - self.f.tell()) if self.plan else b""); self.i = 0; self.done = 0
+
+    def write(self, name, data):
+        """append bytes to blob `name`: blobs must come in plan order, a new blob starts when the previous one is full"""
+        while self.i < len(self.plan) and self.done == self.plan[self.i][1] and self.plan[self.i][0] != name:
+            self._next()
+        if self.i >= len(self.plan) or self.plan[self.i][0] != name: raise ValueError(f"blob {name} written out of plan order (expected {self.plan[self.i][0] if self.i < len(self.plan) else None})")
+        mv = memoryview(data).cast("B"); self.f.write(mv); self.done += len(mv)
+        if self.done > self.plan[self.i][1]: raise ValueError(f"blob {name}: more bytes than planned")
+
+    def _next(self):
+        pad = (-self.done) % ALIGN if False else 0
+        end = self.offs[self.i] + self.plan[self.i][1]; self.i += 1; self.done = 0
+        nxt = self.offs[self.i] if self.i < len(self.plan) else self.end
+        self.f.write(b"\0" * (nxt - end))
+
+    def close(self):
+        while self.i < len(self.plan):
+            if self.done != self.plan[self.i][1]: raise ValueError(f"blob {self.plan[self.i][0]}: {self.done} of {self.plan[self.i][1]} bytes written")
+            self._next()
+        self.f.close(); return os.path.getsize(self.f.name)
 
 
 def pack_model(model, tokenizer_json=None, gen_cfg=None, dense="f16", selftest=None, quant=None):
@@ -174,6 +297,8 @@ def load_state(path):
             state[e["name"]] = torch.from_numpy(np.ascontiguousarray(arr)); continue
         if e["kind"] == "q4":
             state[e["name"]] = torch.from_numpy(dequant_q4(c.blob(e["blob"]), c.blob(e["scale"]), shp)); continue
+        if e["kind"] == "mxfp4":
+            state[e["name"]] = torch.from_numpy(dequant_mxfp4(c.blob(e["blob"]), c.blob(e["scale"]), shp)); continue
         if e["kind"] == "q1":
             state[e["name"]] = torch.from_numpy(dequant_q1(c.blob(e["blob"]), c.blob(e["scale"]), shp)); continue
         if e["kind"] == "tern5":
