@@ -31,7 +31,7 @@ ThreadPool &pool();             // process-wide pool (QPACK_THREADS env or hardw
 void set_threads(int n);         // call before the first pool() use
 
 // ------------------------------------------------------------------ container
-enum class Kind { F32, F16, Q8, Q4, Q1, I64, Tern5, Bits, Mxfp4 };
+enum class Kind { F32, F16, Q8, Q4, Q1, I64, Tern5, Bits, Mxfp4, Q8G };   // Q8G: int8 rows with an fp16 scale per group of 32 columns (scale16)
 struct Tensor {
   std::string name;
   std::vector<int64_t> shape;

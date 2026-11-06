@@ -38,6 +38,10 @@ void mm_mx4(const uint8_t *Q, const uint8_t *S, const int16_t *XQ, const float *
 alignas(16) static const int8_t kMx4Lut2[16] = {0, 1, 2, 3, 4, 6, 8, 12, 0, -1, -2, -3, -4, -6, -8, -12};
 // 2^(e - 128) as a float (exponent field e - 1; e < 2 flushes to 0)
 inline float mx4_scale(uint8_t e) { const uint32_t b = (uint32_t)(e > 1 ? e - 1 : 0) << 23; float f; __builtin_memcpy(&f, &b, 4); return f; }
+// q8g: int8 weights with one fp16 scale per group of 32 columns (outlier rows only coarsen their own groups)
+void rows_q8g(const int8_t *Q, const uint16_t *S, const int16_t *xq, const float *bs, float *y, int r0, int r1, int cols);
+void row_q8g_multi(const int8_t *Q, const uint16_t *S, const int16_t *XQ, int ldq, const float *BS, int nbs, float *Y, int ldy, int r, int nt, int cols);
+void mm_q8g(const int8_t *Q, const uint16_t *S, const int16_t *XQ, const float *BS, int ldq, int nb, int B, float *Y, int ldy, int r0, int r1, int cols);
 void row_q8_multi(const int8_t *Q, const float *scale, const int16_t *XQ, int ldq, const float *BS, int nbs, float *Y, int ldy, int r, int nt, int cols);
 void row_q4_multi(const uint8_t *Q, const uint16_t *S, const int16_t *XQ, int ldq, const float *BS, int nbs, float *Y, int ldy, int r, int nt, int cols);
 void mm_q8(const int8_t *Q, const float *scale, const int16_t *XQ, const float *BS, int ldq, int nb, int B, float *Y, int ldy, int r0, int r1, int cols);

@@ -57,7 +57,7 @@ def write_container(path, blobs, magic=None):
         ent.append((n, off, len(blobs[n]))); off = (off + len(blobs[n]) + ALIGN - 1) // ALIGN * ALIGN
     with open(path, "wb") as o:
         if magic is None:   # QPACK2 as soon as the container holds int8 / int4 / 1-bit tensors, QPACK1 otherwise
-            magic = MAGIC2 if any(n.endswith((".q8", ".q4", ".q1", ".mx4")) for n in names) else MAGIC
+            magic = MAGIC2 if any(n.endswith((".q8", ".q4", ".q1", ".mx4", ".q8g")) for n in names) else MAGIC
         o.write(magic + struct.pack("<II", len(names), 0))
         for n, of, ln in ent: o.write(n.encode().ljust(56, b"\0") + struct.pack("<QQ", of, ln))
         for n, of, ln in ent:

@@ -299,6 +299,25 @@ void mm_q1(const uint8_t *Q, const uint16_t *S, const int16_t *XQ, const float *
   for (int r = r0; r < r1; r++) row_q1_multi(Q, S, XQ, ldq, BS, nb, Y, ldy, r, B, cols);
 }
 
+// q8g (see kernels_impl.h): portable integer code, exact int32 group sums then one float FMA per group; shared by all entry points.
+static void row_q8g(const int8_t *q, const uint16_t *s, const int16_t *x, const float *bs, int cols, float *out) {
+  const int G = cols / 32; float acc = 0;
+  for (int g = 0; g < G; g++) {
+    int32_t d = 0; for (int c = 0; c < 32; c++) d += (int32_t)q[32 * g + c] * xval(x, cols, 32 * g + c);
+    acc = std::fmaf((float)d, f16_to_f32(s[g]) * bs[g >> 2], acc);
+  }
+  *out = acc;
+}
+void rows_q8g(const int8_t *Q, const uint16_t *S, const int16_t *xq, const float *bs, float *y, int r0, int r1, int cols) {
+  for (int r = r0; r < r1; r++) row_q8g(Q + (int64_t)r * cols, S + (int64_t)r * (cols / 32), xq, bs, cols, y + r);
+}
+void row_q8g_multi(const int8_t *Q, const uint16_t *S, const int16_t *XQ, int ldq, const float *BS, int nbs, float *Y, int ldy, int r, int nt, int cols) {
+  for (int j = 0; j < nt; j++) row_q8g(Q + (int64_t)r * cols, S + (int64_t)r * (cols / 32), XQ + (int64_t)j * ldq, BS + (int64_t)j * nbs, cols, Y + (int64_t)j * ldy + r);
+}
+void mm_q8g(const int8_t *Q, const uint16_t *S, const int16_t *XQ, const float *BS, int ldq, int nb, int B, float *Y, int ldy, int r0, int r1, int cols) {
+  for (int r = r0; r < r1; r++) row_q8g_multi(Q, S, XQ, ldq, BS, nb, Y, ldy, r, B, cols);
+}
+
 // mxfp4 (see kernels_impl.h): portable integer code like q1 -- the exact int32 group sum, then one float FMA per group in group
 // order; all entry points share row_mx4, so they are bit-identical to each other.
 static void row_mx4(const uint8_t *q, const uint8_t *s, const int16_t *x, const float *bs, int cols, float *out) {

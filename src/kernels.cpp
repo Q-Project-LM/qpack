@@ -43,6 +43,7 @@ static void rows_any(const Tensor &W, const float *x, const int16_t *xp, const f
     case Kind::Q8: rows_q8((const int8_t *)W.data, W.scale, xp, bp, y, a, b, cols); break;
     case Kind::Q4: rows_q4((const uint8_t *)W.data, W.scale16, xp, bp, y, a, b, cols); break;
     case Kind::Q1: rows_q1((const uint8_t *)W.data, W.scale16, xp, bp, y, a, b, cols); break;
+    case Kind::Q8G: rows_q8g((const int8_t *)W.data, W.scale16, xp, bp, y, a, b, cols); break;
     case Kind::Mxfp4: rows_mx4((const uint8_t *)W.data, W.scale8, xp, bp, y, a, b, cols); break;
     default: throw std::runtime_error("matvec: unsupported tensor kind for " + W.name);
   }
@@ -53,7 +54,7 @@ void matvec_n(const Tensor *const *W, int nw, const float *x, float *const *y, i
   int total = 0, start[8]; bool quant = false;
   for (int i = 0; i < nw; i++) {
     if (g_act_hook) g_act_hook(*W[i], x, 1, cols, cols);
-    start[i] = total; total += (int)W[i]->rows(); quant |= W[i]->kind == Kind::Q8 || W[i]->kind == Kind::Q4 || W[i]->kind == Kind::Q1 || W[i]->kind == Kind::Mxfp4;
+    start[i] = total; total += (int)W[i]->rows(); quant |= W[i]->kind == Kind::Q8 || W[i]->kind == Kind::Q4 || W[i]->kind == Kind::Q1 || W[i]->kind == Kind::Mxfp4 || W[i]->kind == Kind::Q8G;
   }
   start[nw] = total;
   const int nb = (cols + QB - 1) / QB;
@@ -76,7 +77,7 @@ void matvec(const Tensor &W, const float *x, float *y, int rows, int cols) {
   switch (W.kind) {
     case Kind::F32: run([&](int a, int b) { rows_f32(W.f32(), x, y, a, b, cols); }); break;
     case Kind::F16: run([&](int a, int b) { rows_f16((const uint16_t *)W.data, x, y, a, b, cols); }); break;
-    case Kind::Q8: case Kind::Q4: case Kind::Q1: case Kind::Mxfp4: {
+    case Kind::Q8: case Kind::Q4: case Kind::Q1: case Kind::Mxfp4: case Kind::Q8G: {
       const int nb = (cols + QB - 1) / QB;
       thread_local std::vector<int16_t> xq; thread_local std::vector<float> bs;
       if ((int)xq.size() < cols + 32) xq.resize(cols + 32);
@@ -85,6 +86,7 @@ void matvec(const Tensor &W, const float *x, float *y, int rows, int cols) {
       const int16_t *xp = xq.data(); const float *bp = bs.data();
       if (W.kind == Kind::Q8) run([&](int a, int b) { rows_q8((const int8_t *)W.data, W.scale, xp, bp, y, a, b, cols); });
       else if (W.kind == Kind::Q4) run([&](int a, int b) { rows_q4((const uint8_t *)W.data, W.scale16, xp, bp, y, a, b, cols); });
+      else if (W.kind == Kind::Q8G) run([&](int a, int b) { rows_q8g((const int8_t *)W.data, W.scale16, xp, bp, y, a, b, cols); });
       else if (W.kind == Kind::Mxfp4) run([&](int a, int b) { rows_mx4((const uint8_t *)W.data, W.scale8, xp, bp, y, a, b, cols); });
       else run([&](int a, int b) { rows_q1((const uint8_t *)W.data, W.scale16, xp, bp, y, a, b, cols); });
       break;
@@ -101,7 +103,7 @@ void matmul(const Tensor &W, const float *X, int B, int ldx, float *Y, int ldy, 
     thread_local std::vector<int16_t> xq; thread_local std::vector<float> bs;
     if (xq.size() < (size_t)B * ldq + 32) xq.resize((size_t)B * ldq + 32);
     if (bs.size() < (size_t)B * nb) bs.resize((size_t)B * nb);
-    const bool qz = W.kind == Kind::Q8 || W.kind == Kind::Q4 || W.kind == Kind::Q1 || W.kind == Kind::Mxfp4;
+    const bool qz = W.kind == Kind::Q8 || W.kind == Kind::Q4 || W.kind == Kind::Q1 || W.kind == Kind::Mxfp4 || W.kind == Kind::Q8G;
     if (qz) for (int b = 0; b < B; b++) quant_rows(X + (size_t)b * ldx, 1, cols, cols, cols, nb, xq.data() + (size_t)b * ldq, bs.data() + (size_t)b * nb);
     const int16_t *xp = xq.data(); const float *bp = bs.data();
     auto f = [&](int a, int b2) {
@@ -110,6 +112,7 @@ void matmul(const Tensor &W, const float *X, int B, int ldx, float *Y, int ldy, 
           const int nt = std::min(4, B - b);
           if (W.kind == Kind::Q4) row_q4_multi((const uint8_t *)W.data, W.scale16, xp + (size_t)b * ldq, ldq, bp + (size_t)b * nb, nb, Y + (size_t)b * ldy, ldy, r, nt, cols);
           else if (W.kind == Kind::Q1) row_q1_multi((const uint8_t *)W.data, W.scale16, xp + (size_t)b * ldq, ldq, bp + (size_t)b * nb, nb, Y + (size_t)b * ldy, ldy, r, nt, cols);
+          else if (W.kind == Kind::Q8G) row_q8g_multi((const int8_t *)W.data, W.scale16, xp + (size_t)b * ldq, ldq, bp + (size_t)b * nb, nb, Y + (size_t)b * ldy, ldy, r, nt, cols);
           else if (W.kind == Kind::Mxfp4) row_mx4_multi((const uint8_t *)W.data, W.scale8, xp + (size_t)b * ldq, ldq, bp + (size_t)b * nb, nb, Y + (size_t)b * ldy, ldy, r, nt, cols);
           else if (W.kind == Kind::Q8) row_q8_multi((const int8_t *)W.data, W.scale, xp + (size_t)b * ldq, ldq, bp + (size_t)b * nb, nb, Y + (size_t)b * ldy, ldy, r, nt, cols);
           else for (int j = b; j < b + nt; j++) rows_any(W, X + (size_t)j * ldx, xp + (size_t)j * ldq, bp + (size_t)j * nb, Y + (size_t)j * ldy, r, r + 1, cols);
@@ -122,7 +125,7 @@ void matmul(const Tensor &W, const float *X, int B, int ldx, float *Y, int ldy, 
   switch (W.kind) {
     case Kind::F32: run([&](int a, int b) { mm_f32(W.f32(), X, ldx, B, Y, ldy, a, b, cols); }); break;
     case Kind::F16: run([&](int a, int b) { mm_f16((const uint16_t *)W.data, X, ldx, B, Y, ldy, a, b, cols); }); break;
-    case Kind::Q8: case Kind::Q4: case Kind::Q1: case Kind::Mxfp4: {
+    case Kind::Q8: case Kind::Q4: case Kind::Q1: case Kind::Mxfp4: case Kind::Q8G: {
       const int nb = (cols + QB - 1) / QB, ldq = (cols + 31) & ~31;
       thread_local std::vector<int16_t> xq; thread_local std::vector<float> bs;
       if (xq.size() < (size_t)B * ldq) xq.resize((size_t)B * ldq);
@@ -130,6 +133,7 @@ void matmul(const Tensor &W, const float *X, int B, int ldx, float *Y, int ldy, 
       quant_rows(X, B, ldx, cols, ldq, nb, xq.data(), bs.data());
       const int16_t *xp = xq.data(); const float *bp = bs.data();
       if (W.kind == Kind::Q8) run([&](int a, int b) { mm_q8((const int8_t *)W.data, W.scale, xp, bp, ldq, nb, B, Y, ldy, a, b, cols); });
+      else if (W.kind == Kind::Q8G) run([&](int a, int b) { mm_q8g((const int8_t *)W.data, W.scale16, xp, bp, ldq, nb, B, Y, ldy, a, b, cols); });
       else if (W.kind == Kind::Mxfp4) run([&](int a, int b) { mm_mx4((const uint8_t *)W.data, W.scale8, xp, bp, ldq, nb, B, Y, ldy, a, b, cols); });
       else if (W.kind == Kind::Q1) run([&](int a, int b) { mm_q1((const uint8_t *)W.data, W.scale16, xp, bp, ldq, nb, B, Y, ldy, a, b, cols); });
       else run([&](int a, int b) { mm_q4((const uint8_t *)W.data, W.scale16, xp, bp, ldq, nb, B, Y, ldy, a, b, cols); });
@@ -156,6 +160,11 @@ void row_f32(const Tensor &W, int64_t r, float *out) {
     case Kind::Q1: {
       const int64_t G = (n + 127) / 128; const uint8_t *q = (const uint8_t *)W.data + r * G * 16; const uint16_t *s = W.scale16 + r * G;
       for (int64_t c = 0; c < n; c++) out[c] = ((q[c >> 3] >> (c & 7)) & 1 ? 1.f : -1.f) * f16_to_f32(s[c >> 7]);
+      break;
+    }
+    case Kind::Q8G: {
+      const int8_t *q = (const int8_t *)W.data + r * n; const uint16_t *s = W.scale16 + r * (n / 32);
+      for (int64_t c = 0; c < n; c++) out[c] = q[c] * f16_to_f32(s[c >> 5]);
       break;
     }
     case Kind::Mxfp4: {

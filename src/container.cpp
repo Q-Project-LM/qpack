@@ -50,6 +50,10 @@ Container::Container(const std::string &path) {
       t.kind = Kind::Q1; t.data = p; size_t sl; t.scale16 = (const uint16_t *)blob(e["scale"].as_str(), &sl); t.group = (int)e["group"].as_int(128);
       if (t.group != 128 || t.shape.size() < 2) throw std::runtime_error("q1 tensor " + t.name + ": only group 128 and 2-D / 3-D shapes are supported");
     }
+    else if (kind == "q8g") {
+      t.kind = Kind::Q8G; t.data = p; size_t sl; t.scale16 = (const uint16_t *)blob(e["scale"].as_str(), &sl); t.group = (int)e["group"].as_int(32);
+      if (t.group != 32 || t.shape.size() != 2 || t.shape[1] % 32 || t.shape[1] > 32768) throw std::runtime_error("q8g tensor " + t.name + ": group 32, 2-D, cols % 32 == 0 and <= 32768 required");
+    }
     else if (kind == "mxfp4") {
       t.kind = Kind::Mxfp4; t.data = p; size_t sl; t.scale8 = blob(e["scale"].as_str(), &sl); t.group = (int)e["group"].as_int(32);
       if (t.group != 32 || t.shape.size() < 2) throw std::runtime_error("mxfp4 tensor " + t.name + ": only group 32 and 2-D / 3-D shapes are supported");

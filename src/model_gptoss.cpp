@@ -81,9 +81,10 @@ class GptOss : public Model {
         inv_[i] = in * (1 - mask) + ex * mask;
       }
     }
+    if (const char *p = getenv("QPACK_DUMP_EXPERT_IN")) { cap_dir_ = p; cap_n_ = getenv("QPACK_DUMP_EXPERT_N") ? atoi(getenv("QPACK_DUMP_EXPERT_N")) : 2048; }
     if (const char *p = getenv("QPACK_DUMP")) dump_ = fopen(p, "wb");
   }
-  ~GptOss() override { if (dump_) fclose(dump_); }
+  ~GptOss() override { if (dump_) fclose(dump_); for (FILE *f : cap_f_) if (f) fclose(f); }
   int vocab() const override { return V_; }
   int hidden() const override { return d_; }
   int max_ctx() const override { return ctx_; }
@@ -166,6 +167,19 @@ class GptOss : public Model {
     }
   }
 
+  // calibration capture (QPACK_DUMP_EXPERT_IN=dir [QPACK_DUMP_EXPERT_N=2048]): per layer l, files L{l}.in.f16 (the normalised MoE input = gate_up input,
+  // fp16 [token, d]), L{l}.sel.u8 (4 selected expert ids per token, router order) and L{l}.w.f16 (their 4 softmax weights); first N positions only
+  void capture(int l, int pos, const float *xn, const int *idx, const float *rw) {
+    if (cap_dir_.empty() || pos >= cap_n_) return;
+    if (cap_f_.empty()) cap_f_.assign(3 * L_, nullptr);
+    if (!cap_f_[3 * l]) {
+      const char *nm[3] = {"in.f16", "sel.u8", "w.f16"};
+      for (int k = 0; k < 3; k++) { std::string f = cap_dir_ + "/L" + std::to_string(l) + "." + nm[k]; cap_f_[3 * l + k] = fopen(f.c_str(), "wb"); if (!cap_f_[3 * l + k]) throw std::runtime_error("cannot write " + f); }
+    }
+    std::vector<uint16_t> h(d_); to_f16(xn, h.data(), d_); fwrite(h.data(), 2, d_, cap_f_[3 * l]);
+    uint8_t sel[8]; uint16_t w16[8]; for (int k = 0; k < K_; k++) sel[k] = (uint8_t)idx[k];
+    to_f16(rw, w16, K_ < 4 ? 4 : K_); fwrite(sel, 1, K_, cap_f_[3 * l + 1]); fwrite(w16, 2, K_, cap_f_[3 * l + 2]);
+  }
   void dump(const float *x) { if (dump_) { fwrite(x, 4, d_, dump_); fflush(dump_); } }
 
   // ---------------------------------------------------------------- one token
@@ -190,7 +204,7 @@ class GptOss : public Model {
       // MoE
       rmsnorm(x_.data(), ly.fn->f32(), d_, eps_, xn_.data());
       matvec(*ly.rw, xn_.data(), rl_.data(), E_, d_); for (int e = 0; e < E_; e++) rl_[e] += ly.rb->f32()[e];
-      int idx[8]; float rw[8]; route(rl_.data(), idx, rw);
+      int idx[8]; float rw[8]; route(rl_.data(), idx, rw); capture(l, pos_, xn_.data(), idx, rw);
       { const Tensor *w[8]; float *o[8]; for (int k = 0; k < K_; k++) { w[k] = &ly.gu[idx[k]]; o[k] = gub_.data() + (size_t)k * 2 * ff_; } matvec_n(w, K_, xn_.data(), o, d_); }
       std::fill(eo_.begin(), eo_.end(), 0.f);
       for (int k = 0; k < K_; k++) {
@@ -213,6 +227,10 @@ class GptOss : public Model {
     return logits_.data();
   }
 
+  void prefill_all(const int *toks, int n, float *logits) override {
+    if (n == 1) { const float *l = step(toks[0], 1); memcpy(logits, l, 4ull * V_); return; }
+    all_logits_ = logits; try { prefill(toks, n, 0); } catch (...) { all_logits_ = nullptr; throw; } all_logits_ = nullptr;
+  }
   // ---------------------------------------------------------------- prompt batches
   const float *prefill(const int *toks, int n, int want) override {
     if (n == 1) return step(toks[0], want);
@@ -262,7 +280,7 @@ class GptOss : public Model {
         std::vector<std::vector<std::pair<int, float>>> asg(E_);
         for (int i = 0; i < B; i++) {
           float *r = bR_.data() + (size_t)i * E_; for (int e = 0; e < E_; e++) r[e] += ly.rb->f32()[e];
-          int idx[8]; float rw[8]; route(r, idx, rw); for (int k = 0; k < K_; k++) asg[idx[k]].push_back({i, rw[k]});
+          int idx[8]; float rw[8]; route(r, idx, rw); capture(l, p0 + i, bXN_.data() + (size_t)i * d_, idx, rw); for (int k = 0; k < K_; k++) asg[idx[k]].push_back({i, rw[k]});
         }
         std::fill(bO_.begin(), bO_.begin() + (size_t)B * d_, 0.f);   // accumulates the weighted expert outputs
         for (int e = 0; e < E_; e++) {
@@ -279,6 +297,10 @@ class GptOss : public Model {
         for (size_t j = 0; j < (size_t)B * d_; j++) bX_[j] += bO_[j];
         if (last) dump(bX_.data() + (size_t)(B - 1) * d_);
       }
+      if (all_logits_) {   // logits of every position (perplexity)
+        pool().parallel_for(B, [&](int a, int b) { for (int i = a; i < b; i++) rmsnorm(bX_.data() + (size_t)i * d_, fnorm_->f32(), d_, eps_, bXN_.data() + (size_t)i * d_); }, 4);
+        matmul(*head_, bXN_.data(), B, d_, all_logits_ + (size_t)s0 * V_, V_, V_, d_);
+      }
       pos_ += B;
     }
     memcpy(x_.data(), bX_.data() + (size_t)((n - 1) % PB) * d_, 4 * d_);
@@ -291,7 +313,8 @@ class GptOss : public Model {
 
  private:
   const bool debug_ = getenv("QPACK_DEBUG") != nullptr;
-  FILE *dump_ = nullptr;
+  std::string cap_dir_; int cap_n_ = 2048; std::vector<FILE *> cap_f_;
+  FILE *dump_ = nullptr; float *all_logits_ = nullptr;
   std::vector<float> part_;
   const int64_t attn_par_min_ = getenv("QPACK_ATTN_PAR") ? atoll(getenv("QPACK_ATTN_PAR")) : (1 << 20);
   int d_, L_, nh_, nkv_, hd_, ff_, V_, E_, K_, ctx_, kvd_, window_, pos_ = 0; float eps_, limit_, alpha_; double conc_;

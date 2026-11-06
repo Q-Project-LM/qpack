@@ -56,6 +56,14 @@ def q8_rows(w):
     return np.clip(np.rint(w / sc[:, None]), -127, 127).astype(np.int8).tobytes(), sc.tobytes()
 
 
+def q8g_rows(w):
+    """int8 with an fp16 scale per group of 32 columns (outlier rows only coarsen their own groups)"""
+    R, C = w.shape; g = w.reshape(R, C // 32, 32)
+    sc = f16(np.abs(g).max(2) / 127.0).astype(np.float32); sc1 = np.where(sc > 0, sc, 1.0)
+    q = np.clip(np.rint(g / sc1[..., None]), -127, 127).astype(np.int8)
+    return q.tobytes(), f16(sc).tobytes()
+
+
 def q4_rows(w):
     """RTN-ish q4: groups of 32, scale from the extreme value (+7 / -8 side) refitted by least squares, fp16 scale"""
     R, C = w.shape; g = w.reshape(R, C // 32, 32)
@@ -99,13 +107,14 @@ def blob_sizes(kind, R, C):
     if kind == "f32": return {"": 4 * R * C}
     if kind == "f16": return {"": 2 * R * C}
     if kind == "q8": return {"": R * C, ".scale": 4 * R}
+    if kind == "q8g": assert C % 32 == 0; return {"": R * C, ".scale": 2 * R * (C // 32)}
     if kind == "q4": assert C % 32 == 0; return {"": R * C // 2, ".scale": 2 * R * (C // 32)}
     if kind == "q1": G = (C + 127) // 128; return {"": R * G * 16, ".scale": 2 * R * G}
     if kind == "mxfp4": assert C % 32 == 0; return {"": R * C // 2, ".scale": R * (C // 32)}
     raise ValueError(kind)
 
 
-EXT = {"f32": ".f32", "f16": ".f16", "q8": ".q8", "q4": ".q4", "q1": ".q1", "mxfp4": ".mx4"}
+EXT = {"f32": ".f32", "f16": ".f16", "q8": ".q8", "q8g": ".q8g", "q4": ".q4", "q1": ".q1", "mxfp4": ".mx4"}
 
 
 def build(args):
@@ -139,7 +148,7 @@ def build(args):
         ent = dict(name=s["name"], shape=shp, dtype="float32", kind=s["kind"], blob=bid + EXT[s["kind"]])
         for suf, n in sz.items(): plan.append((bid + (EXT[s["kind"]] if suf == "" else suf), n))
         if ".scale" in [x for x in sz]: ent["scale"] = bid + ".scale"
-        if s["kind"] in ("q4", "mxfp4"): ent["group"] = 32
+        if s["kind"] in ("q4", "mxfp4", "q8g"): ent["group"] = 32
         if s["kind"] == "q1": ent["group"] = 128
         man.append(ent)
     return st, cfg, L, specs, plan, man
@@ -161,6 +170,35 @@ def runtime_config(cfg, tok_cfg, args, L):
     }
 
 
+NPROC = int(os.environ.get("QPACK_CONVERT_PROCS", "4")); _POOL = None; _WST = None
+
+
+def _expert_chunk(st, t):
+    bk, sk, e, r0, r1, kind = t
+    b = st.get(bk, e, e + 1)[0, r0:r1]; sc = st.get(sk, e, e + 1)[0, r0:r1]
+    if kind == "mxfp4": return mx4_rows(b, sc)
+    return {"q8": q8_rows, "q8g": q8g_rows, "q4": q4_rows, "q1": q1_rows}[kind](np.ascontiguousarray(dq_mx4_rows(b, sc), np.float32))
+
+
+def _init_worker(src):
+    global _WST
+    _WST = SafeTensors(sorted(glob.glob(os.path.join(src, "model-*.safetensors"))))
+
+
+def _expert_chunk_w(t): return _expert_chunk(_WST, t)
+
+
+def _pool():
+    global _POOL
+    if _POOL is None:
+        import multiprocessing as mp
+        _POOL = mp.get_context("fork").Pool(NPROC, initializer=_init_worker, initargs=(ARGS_SRC,))
+    return _POOL
+
+
+ARGS_SRC = None
+
+
 def emit(w, st, s, kind_args):
     """stream tensor spec s into the writer"""
     kind, (R, C) = s["kind"], s["RC"]; bid = s["bid"]; ext = EXT[kind]; scales = []
@@ -175,14 +213,12 @@ def emit(w, st, s, kind_args):
             emit_rows(w, kind, bid, ext, x, scales)
     else:   # experts: HF blocks [E, R, G, 16] + scales [E, R, G]
         E, Rr, G, _ = st.t[src[1]][3]; step = max(1, CHUNK // (G * 32))
-        for e in range(E):
-            for r0 in range(0, Rr, step):
-                r1 = min(Rr, r0 + step)
-                b = st.get(src[1], e, e + 1)[0, r0:r1]; sc = st.get(src[2], e, e + 1)[0, r0:r1]
-                if kind == "mxfp4":
-                    d, s_ = mx4_rows(b, sc); w.write(bid + ext, d); scales.append(s_)
-                else:
-                    emit_rows(w, kind, bid, ext, dq_mx4_rows(b, sc), scales)
+        tasks = [(src[1], src[2], e, r0, min(Rr, r0 + step), kind) for e in range(E) for r0 in range(0, Rr, step)]
+        if kind == "mxfp4" or NPROC <= 1: results = map(lambda t: _expert_chunk(st, t), tasks)
+        else: results = _pool().imap(_expert_chunk_w, tasks)   # requantisation is CPU-heavy: a few worker processes, results in order
+        for d, s_ in results:
+            w.write(bid + ext, d)
+            if s_: scales.append(s_)
     if scales: w.write(bid + ".scale", b"".join(scales))
 
 
@@ -190,7 +226,7 @@ def emit_rows(w, kind, bid, ext, x, scales):
     if kind == "f32": w.write(bid + ext, np.ascontiguousarray(x, np.float32))
     elif kind == "f16": w.write(bid + ext, f16(x))
     else:
-        d, s_ = {"q8": q8_rows, "q4": q4_rows, "q1": q1_rows}[kind](np.ascontiguousarray(x, np.float32)); w.write(bid + ext, d); scales.append(s_)
+        d, s_ = {"q8": q8_rows, "q8g": q8g_rows, "q4": q4_rows, "q1": q1_rows}[kind](np.ascontiguousarray(x, np.float32)); w.write(bid + ext, d); scales.append(s_)
 
 
 def patch_selftest(path, ref_json):
@@ -207,13 +243,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("src"); ap.add_argument("out")
     ap.add_argument("--experts", default="mxfp4", choices=["mxfp4", "q8", "q4", "q1"])
-    ap.add_argument("--attn", default="q8", choices=["q8", "q4", "f16"])
-    ap.add_argument("--embed", default="q8", choices=["q8", "q4", "f16"], help="embedding and lm_head")
-    ap.add_argument("--head", default=None, choices=["q8", "q4", "f16"], help="lm_head (default: same as --embed)")
+    ap.add_argument("--attn", default="q8", choices=["q8", "q8g", "q4", "f16"])
+    ap.add_argument("--embed", default="q8", choices=["q8", "q8g", "q4", "f16"], help="embedding and lm_head")
+    ap.add_argument("--head", default=None, choices=["q8", "q8g", "q4", "f16"], help="lm_head (default: same as --embed)")
     ap.add_argument("--router", default="f32", choices=["f32", "q8", "f16"])
     ap.add_argument("--layers", type=int, default=0, help="convert only the first N layers (debugging)")
     ap.add_argument("--selftest", default=None, help="selftest.json (reference top-5 logits) to embed")
     args = ap.parse_args()
+    global ARGS_SRC; ARGS_SRC = args.src
     st, cfg, L, specs, plan, man = build(args)
     tok_cfg = json.load(open(os.path.join(args.src, "tokenizer_config.json")))
     extra = {"manifest.json": json.dumps(dict(format="QPACK2", tensors=man, quant=args.experts)).encode(),

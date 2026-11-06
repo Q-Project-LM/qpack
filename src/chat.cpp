@@ -277,11 +277,19 @@ GenResult Session::chat_turn(const std::vector<Message> &msgs_in, int max_new, S
 
 double Session::nll(const std::vector<int> &ids, int *count) {
   m_->reset(); hist_.clear(); double tot = 0; int n = 0; const float *lg = nullptr; const int V = m_->vocab();
-  for (size_t i = 0; i + 1 < ids.size() && (int)i < m_->max_ctx(); i++) {
-    lg = m_->step(ids[i], 1); hist_.push_back(ids[i]);
-    float mx = lg[0]; for (int v = 1; v < V; v++) mx = std::max(mx, lg[v]);
-    double z = 0; for (int v = 0; v < V; v++) z += std::exp((double)lg[v] - mx);
-    tot += mx + std::log(z) - lg[ids[i + 1]]; n++;
+  const bool batched = m_->arch() == "gptoss";   // batched prompt path (expert-grouped) instead of one token at a time
+  const int N = (int)std::min<size_t>(ids.size() ? ids.size() - 1 : 0, (size_t)m_->max_ctx());
+  std::vector<float> blk; const int BS = 64; if (batched) blk.resize((size_t)BS * V);
+  for (int i0 = 0; i0 < N; i0 += batched ? BS : 1) {
+    const int nb = batched ? std::min(BS, N - i0) : 1;
+    if (batched) { m_->prefill_all(ids.data() + i0, nb, blk.data()); } else lg = m_->step(ids[i0], 1);
+    for (int b = 0; b < nb; b++) {
+      const float *l = batched ? blk.data() + (size_t)b * V : lg; const int i = i0 + b;
+      float mx = l[0]; for (int v = 1; v < V; v++) mx = std::max(mx, l[v]);
+      double z = 0; for (int v = 0; v < V; v++) z += std::exp((double)l[v] - mx);
+      tot += mx + std::log(z) - l[ids[i + 1]]; n++;
+    }
+    hist_.insert(hist_.end(), ids.begin() + i0, ids.begin() + i0 + nb);
   }
   if (count) *count = n;
   return n ? tot / n : 0;
