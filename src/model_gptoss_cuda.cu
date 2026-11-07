@@ -207,17 +207,17 @@ template <int K, int NP> __device__ __forceinline__ void load_pair(Pair<K, NP> &
   for (int q = 0; q < NP; q++) { p.a[q].load(D.gq[q], D.gs[q], 2 * (size_t)n, units, lane); p.b[q].load(D.gq[q], D.gs[q], 2 * (size_t)n + 1, units, lane); }
 }
 // gate/up of the expert in device slot blockIdx.y for 32 neurons (rows 2n = gate, 2n + 1 = up, interleaved), swiglu-oai, quantised h
+constexpr int GUT = 512, NPW = 32 * 32 / GUT / 32 * 0 + 32 / (GUT / 32);   // threads per gate/up block; neurons per warp
 template <int K, int NP> __device__ __forceinline__ void gu_body(const ExpD &D, int eid, const float *bgu, float limit, float alpha, int units, int ff, const int4 *aq, const float *as, const int *asum,
-                                                                 int8_t *hq, float *hs, int *hsum) {
-  __shared__ int4 sx[4 * UMAX]; __shared__ float sxs[UMAX]; __shared__ int sxsum[UMAX]; __shared__ float sh[32];
-  const int tid = threadIdx.x, wp = tid >> 5, lane = tid & 31, nb = blockIdx.x * 32 + wp * 4;
+                                                                 int8_t *hq, float *hs, int *hsum, int4 *sx, float *sxs, int *sxsum, float *sh) {
+  const int tid = threadIdx.x, wp = tid >> 5, lane = tid & 31, nb = blockIdx.x * 32 + wp * NPW;
   Pair<K, NP> cur, nxt; load_pair(cur, D, nb, units, lane);
-  for (int i = tid; i < 4 * units; i += 256) { const int ph = i / units, u = i - ph * units; sx[ph * UMAX + u] = aq[ph * UMAX + u]; }
-  for (int i = tid; i < units; i += 256) { sxs[i] = as[i]; sxsum[i] = asum[i]; }
+  for (int i = tid; i < 4 * units; i += GUT) { const int ph = i / units, u = i - ph * units; sx[ph * UMAX + u] = aq[ph * UMAX + u]; }
+  for (int i = tid; i < units; i += GUT) { sxs[i] = as[i]; sxsum[i] = asum[i]; }
   __syncthreads();
 #pragma unroll
-  for (int i = 0; i < 4; i++) {
-    if (i < 3) load_pair(nxt, D, nb + i + 1, units, lane);
+  for (int i = 0; i < NPW; i++) {
+    if (i < NPW - 1) load_pair(nxt, D, nb + i + 1, units, lane);
     float g = 0, u = 0;
 #pragma unroll
     for (int q = 0; q < NP; q++) { g += cur.a[q].dot(sx, sxs, sxsum, units, lane); u += cur.b[q].dot(sx, sxs, sxsum, units, lane); }
@@ -225,24 +225,26 @@ template <int K, int NP> __device__ __forceinline__ void gu_body(const ExpD &D, 
     if (lane == 0) {
       const int n = nb + i; g += bgu[(size_t)eid * 2 * ff + 2 * n]; u += bgu[(size_t)eid * 2 * ff + 2 * n + 1];
       const float gl = fminf(g, limit), ul = fmaxf(-limit, fminf(limit, u));
-      sh[wp * 4 + i] = gl / (1.f + expf(-alpha * gl)) * (ul + 1.f);
+      sh[wp * NPW + i] = gl / (1.f + expf(-alpha * gl)) * (ul + 1.f);
     }
-    if (i < 3) cur = nxt;
+    if (i < NPW - 1) cur = nxt;
   }
   __syncthreads();
   if (wp == 0) warp_actq(sh[lane], blockIdx.x, lane, hq, hs, hsum);
 }
-__global__ void __launch_bounds__(256) k_gateup(const ExpD *tab, const int *sel, const float *bgu, float limit, float alpha, int units, int ff, const int4 *aq, const float *as, const int *asum,
+// MODE 0: mxfp4 experts, 1: q1, 2: q1 with a second plane; blocks whose expert has another kind exit (separate kernels give each kind its own register budget)
+template <int MODE> __global__ void __launch_bounds__(GUT, MODE == 0 ? 1 : 2) k_gateup(const ExpD *tab, const int *sel, const float *bgu, float limit, float alpha, int units, int ff, const int4 *aq, const float *as, const int *asum,
                                                 int8_t *hq, float *hs, int *hsum) {
   const int k = blockIdx.y, eid = sel[k]; const ExpD D = tab[eid];
+  if ((D.kind == 0 ? 0 : D.np == 1 ? 1 : 2) != MODE) return;
+  __shared__ int4 sx[4 * UMAX]; __shared__ float sxs[UMAX]; __shared__ int sxsum[UMAX]; __shared__ float sh[32];
   int8_t *q = hq + (size_t)k * ABYTES; float *s = hs + k * UMAX; int *sm = hsum + k * UMAX;
-  if (D.kind == 0) gu_body<0, 1>(D, eid, bgu, limit, alpha, units, ff, aq, as, asum, q, s, sm);
-  else if (D.np == 1) gu_body<1, 1>(D, eid, bgu, limit, alpha, units, ff, aq, as, asum, q, s, sm);
-  else gu_body<1, 2>(D, eid, bgu, limit, alpha, units, ff, aq, as, asum, q, s, sm);
+  if (MODE == 0) gu_body<0, 1>(D, eid, bgu, limit, alpha, units, ff, aq, as, asum, q, s, sm, sx, sxs, sxsum, sh);
+  else if (MODE == 1) gu_body<1, 1>(D, eid, bgu, limit, alpha, units, ff, aq, as, asum, q, s, sm, sx, sxs, sxsum, sh);
+  else gu_body<1, 2>(D, eid, bgu, limit, alpha, units, ff, aq, as, asum, q, s, sm, sx, sxs, sxsum, sh);
 }
 // down projection of expert slot blockIdx.y, 8 rows per block: ye[k][r] = wt[k] * (W h + b)
-template <int K, int NP> __device__ __forceinline__ void dn_body(const ExpD &D, int eid, float wk, const float *bd, int units, int d, const int4 *aq, const float *as, const int *asum, float *ye) {
-  __shared__ int4 sx[4 * UMAX]; __shared__ float sxs[UMAX]; __shared__ int sxsum[UMAX];
+template <int K, int NP> __device__ __forceinline__ void dn_body(const ExpD &D, int eid, float wk, const float *bd, int units, int d, const int4 *aq, const float *as, const int *asum, float *ye, int4 *sx, float *sxs, int *sxsum) {
   const int tid = threadIdx.x, wp = tid >> 5, lane = tid & 31, r = blockIdx.x * 8 + wp;
   RR<K> row[NP];
 #pragma unroll
@@ -256,11 +258,14 @@ template <int K, int NP> __device__ __forceinline__ void dn_body(const ExpD &D, 
   acc = warp_sum(acc);
   if (lane == 0) ye[(size_t)blockIdx.y * d + r] = wk * (acc + bd[(size_t)eid * d + r]);
 }
-__global__ void __launch_bounds__(256) k_down(const ExpD *tab, const int *sel, const float *wt, const float *bd, int units, int d, const int4 *aq, const float *as, const int *asum, float *ye) {
-  const int k = blockIdx.y, eid = sel[k]; const ExpD D = tab[eid]; const int4 *q = aq + (size_t)k * (ABYTES / 16); const float *s = as + k * UMAX; const int *sm = asum + k * UMAX;
-  if (D.kind == 0) dn_body<0, 1>(D, eid, wt[k], bd, units, d, q, s, sm, ye);
-  else if (D.np == 1) dn_body<1, 1>(D, eid, wt[k], bd, units, d, q, s, sm, ye);
-  else dn_body<1, 2>(D, eid, wt[k], bd, units, d, q, s, sm, ye);
+template <int MODE> __global__ void __launch_bounds__(256, MODE == 0 ? 5 : 8) k_down(const ExpD *tab, const int *sel, const float *wt, const float *bd, int units, int d, const int4 *aq, const float *as, const int *asum, float *ye) {
+  const int k = blockIdx.y, eid = sel[k]; const ExpD D = tab[eid];
+  if ((D.kind == 0 ? 0 : D.np == 1 ? 1 : 2) != MODE) return;
+  __shared__ int4 sx[4 * UMAX]; __shared__ float sxs[UMAX]; __shared__ int sxsum[UMAX];
+  const int4 *q = aq + (size_t)k * (ABYTES / 16); const float *s = as + k * UMAX; const int *sm = asum + k * UMAX;
+  if (MODE == 0) dn_body<0, 1>(D, eid, wt[k], bd, units, d, q, s, sm, ye, sx, sxs, sxsum);
+  else if (MODE == 1) dn_body<1, 1>(D, eid, wt[k], bd, units, d, q, s, sm, ye, sx, sxs, sxsum);
+  else dn_body<1, 2>(D, eid, wt[k], bd, units, d, q, s, sm, ye, sx, sxs, sxsum);
 }
 
 // ---- attention (head_dim 64, 8 q heads per kv head): block = (kv group, chunk of CH positions), 256 threads; scores: CH positions x 16 lanes (4
@@ -466,6 +471,7 @@ class GptOssCuda : public Model {
     for (int p = 0; p < ctx_; p++) for (int i = 0; i < half; i++) { const double a = p * inv[i]; cs[(size_t)p * half + i] = (float)(std::cos(a) * conc); sn[(size_t)p * half + i] = (float)(std::sin(a) * conc); }
     cos_ = (float *)dalloc(cs.size() * 4); sin_ = (float *)dalloc(sn.size() * 4);
     CK(cudaMemcpy((void *)cos_, cs.data(), cs.size() * 4, cudaMemcpyHostToDevice)); CK(cudaMemcpy((void *)sin_, sn.data(), sn.size() * 4, cudaMemcpyHostToDevice));
+    for (int i = 0; i < 3; i++) has_[i] = seen_[i];
     build_graphs();
     size_t fr = 0, tot = 0; CK(cudaMemGetInfo(&fr, &tot));
     if (getenv("QPACK_VERBOSE")) fprintf(stderr, "cuda gptoss: loaded, %zu MiB device memory free of %zu\n", fr >> 20, tot >> 20);
@@ -603,7 +609,7 @@ class GptOssCuda : public Model {
         iq++;
       }
       if (D.kind == 0 && (c_->get("layers." + ls + ".w_gate_up_x") == nullptr && gu->kind != Kind::Mxfp4)) throw std::runtime_error("cuda gptoss: expert kind");
-      tab[e] = D;
+      tab[e] = D; seen_[D.kind == 0 ? 0 : D.np == 1 ? 1 : 2] = true;
     }
     ExpD *dt = (ExpD *)dalloc(sizeof(ExpD) * E_); CK(cudaMemcpy(dt, tab.data(), sizeof(ExpD) * E_, cudaMemcpyHostToDevice)); ly.tab = dt;
   }
@@ -621,6 +627,13 @@ class GptOssCuda : public Model {
     a.rowstart[nm] = tot;
     if (units <= 96) k_dense<3, 8><<<(tot + 7) / 8, 256, 0, s>>>(a); else k_dense<4, 8><<<(tot + 7) / 8, 256, 0, s>>>(a);
   }
+  void launch_gateup(cudaStream_t s, const ExpD *tab, const float *bgu, const int4 *aA) {
+    const dim3 g(ff_ / 32, NK);
+    if (has_[0]) k_gateup<0><<<g, GUT, 0, s>>>(tab, sel_, bgu, limit_, alpha_, ud_, ff_, aA, aA_s_, aA_sum_, aH_q_, aH_s_, aH_sum_);
+    if (has_[1]) k_gateup<1><<<g, GUT, 0, s>>>(tab, sel_, bgu, limit_, alpha_, ud_, ff_, aA, aA_s_, aA_sum_, aH_q_, aH_s_, aH_sum_);
+    if (has_[2]) k_gateup<2><<<g, GUT, 0, s>>>(tab, sel_, bgu, limit_, alpha_, ud_, ff_, aA, aA_s_, aA_sum_, aH_q_, aH_s_, aH_sum_);
+  }
+  bool has_[3] = {false, false, false}, seen_[3] = {false, false, false};
   void build_graphs() {
     const float scl = 1.f / std::sqrt((float)hd_); cudaStream_t s = st_;
     const int4 *aA = (const int4 *)aA_q_, *aO = (const int4 *)aO_q_, *aH = (const int4 *)aH_q_;
@@ -634,8 +647,11 @@ class GptOssCuda : public Model {
       k_merge<<<nh_, HD, 0, s>>>(part_, ly.sinks, ctl_, nch_, win, aO_q_, aO_s_, aO_sum_);
       { DQ m[1] = {ly.wo}; dense(s, m, &ly.bo, nullptr, 1, qd_ / 32, aO, aO_s_, aO_sum_, x_); }
       k_norm<<<1, 1024, 0, s>>>(x_, ly.fn, nullptr, d_, eps_, aA_q_, aA_s_, aA_sum_, nullptr, ly.rw, ly.rb, E_, sel_, wt_);
-      k_gateup<<<dim3(ff_ / 32, NK), 256, 0, s>>>(ly.tab, sel_, ly.bgu, limit_, alpha_, ud_, ff_, aA, aA_s_, aA_sum_, aH_q_, aH_s_, aH_sum_);
-      k_down<<<dim3(d_ / 8, NK), 256, 0, s>>>(ly.tab, sel_, wt_, ly.bd, uff_, d_, aH, aH_s_, aH_sum_, ye_);
+      launch_gateup(s, ly.tab, ly.bgu, aA);
+      { const dim3 g(d_ / 8, NK);
+        if (has_[0]) k_down<0><<<g, 256, 0, s>>>(ly.tab, sel_, wt_, ly.bd, uff_, d_, aH, aH_s_, aH_sum_, ye_);
+        if (has_[1]) k_down<1><<<g, 256, 0, s>>>(ly.tab, sel_, wt_, ly.bd, uff_, d_, aH, aH_s_, aH_sum_, ye_);
+        if (has_[2]) k_down<2><<<g, 256, 0, s>>>(ly.tab, sel_, wt_, ly.bd, uff_, d_, aH, aH_s_, aH_sum_, ye_); }
     }
     cudaGraph_t ga; CK(cudaStreamEndCapture(s, &ga)); CK(cudaGraphInstantiate(&ga_, ga, nullptr, nullptr, 0)); CK(cudaGraphDestroy(ga));
     for (int variant = 0; variant < 2; variant++) {
@@ -684,8 +700,14 @@ void cuda_gptoss_bench(FILE *out) {
     }
     ExpD *dt; CK(cudaMalloc(&dt, sizeof(ExpD) * E)); CK(cudaMemcpy(dt, tab.data(), sizeof(ExpD) * E, cudaMemcpyHostToDevice));
     auto run = [&](int i) {
-      if (mt == 0) k_gateup<<<dim3(ff / 32, NK), 256, 0, st>>>(dt, sel + 4 * (i & 7), bgu, 7.f, 1.702f, units, ff, (const int4 *)aq, as, asum, hq, hs, hsum);
-      else k_down<<<dim3(d / 8, NK), 256, 0, st>>>(dt, sel + 4 * (i & 7), wt, bd, units, d, (const int4 *)hq, hs, hsum, ye);
+      if (mt == 0) { const dim3 g(ff / 32, NK); const int *sl = sel + 4 * (i & 7); const int4 *a4 = (const int4 *)aq;
+        if (v.kind == 0) k_gateup<0><<<g, GUT, 0, st>>>(dt, sl, bgu, 7.f, 1.702f, units, ff, a4, as, asum, hq, hs, hsum);
+        else if (v.np == 1) k_gateup<1><<<g, GUT, 0, st>>>(dt, sl, bgu, 7.f, 1.702f, units, ff, a4, as, asum, hq, hs, hsum);
+        else k_gateup<2><<<g, GUT, 0, st>>>(dt, sl, bgu, 7.f, 1.702f, units, ff, a4, as, asum, hq, hs, hsum); }
+      else { const dim3 g(d / 8, NK); const int *sl = sel + 4 * (i & 7); const int4 *h4 = (const int4 *)hq;
+        if (v.kind == 0) k_down<0><<<g, 256, 0, st>>>(dt, sl, wt, bd, units, d, h4, hs, hsum, ye);
+        else if (v.np == 1) k_down<1><<<g, 256, 0, st>>>(dt, sl, wt, bd, units, d, h4, hs, hsum, ye);
+        else k_down<2><<<g, 256, 0, st>>>(dt, sl, wt, bd, units, d, h4, hs, hsum, ye); }
     };
     for (int i = 0; i < 300; i++) run(i);
     CK(cudaStreamSynchronize(st)); float best = 1e9;
