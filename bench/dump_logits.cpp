@@ -13,7 +13,7 @@ int main(int argc, char **argv) {
   if (argc < 3) { fprintf(stderr, "usage: dump_logits model.qpack ids [out.f32] [step|prefill] [threads]\n"); return 2; }
   if (argc > 5) set_threads(atoi(argv[5]));
   std::vector<int> ids; { std::string s = argv[2]; size_t p = 0; while (p < s.size()) { size_t q = s.find(',', p); if (q == std::string::npos) q = s.size(); ids.push_back(atoi(s.substr(p, q - p).c_str())); p = q + 1; } }
-  auto m = load_model(argv[1], 0);
+  auto m = load_model(argv[1], getenv("QPACK_CTX") ? atoi(getenv("QPACK_CTX")) : 0);
   const bool pre = argc > 4 && std::string(argv[4]) == "prefill";
   auto t0 = std::chrono::steady_clock::now(); const float *lg = nullptr;
   if (pre) lg = m->prefill(ids.data(), (int)ids.size(), 1);
