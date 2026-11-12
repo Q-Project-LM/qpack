@@ -1,0 +1,28 @@
+start: apps=0 temp=83
+== dump h4
+IDENTICAL
+== dump m6
+IDENTICAL
+== dump m8
+IDENTICAL
+== A/B (g1a = committed gate/up; h4 = +head4; m6/m8 = +head4 + launch-bounds)
+b_g1a T0=86 others=0 after[clk,T]=1113 MHz, 86 :: | E1b-trim80k-q4head.qpack | 256.1 | llama:qwen2@cuda | 8 | 290.5 | 252.2 | 
+b_h4 T0=86 others=0 after[clk,T]=1113 MHz, 86 :: | E1b-trim80k-q4head.qpack | 256.1 | llama:qwen2@cuda | 8 | 276.8 | 246.4 | 
+b_m6 T0=86 others=0 after[clk,T]=1113 MHz, 87 :: | E1b-trim80k-q4head.qpack | 256.1 | llama:qwen2@cuda | 8 | 279.9 | 249.5 | 
+b_m8 T0=87 others=0 after[clk,T]=1113 MHz, 87 :: | E1b-trim80k-q4head.qpack | 256.1 | llama:qwen2@cuda | 8 | 192.3 | 178.5 | 
+b_g1a T0=87 others=0 after[clk,T]=1113 MHz, 88 :: | E1b-trim80k-q4head.qpack | 256.1 | llama:qwen2@cuda | 8 | 290.5 | 252.2 | 
+b_h4 T0=88 others=0 after[clk,T]=1113 MHz, 88 :: | E1b-trim80k-q4head.qpack | 256.1 | llama:qwen2@cuda | 8 | 277.1 | 246.4 | 
+b_m6 T0=88 others=0 after[clk,T]=1113 MHz, 88 :: | E1b-trim80k-q4head.qpack | 256.1 | llama:qwen2@cuda | 8 | 280.1 | 249.5 | 
+b_m8 T0=88 others=0 after[clk,T]=455 MHz, 88 :: | E1b-trim80k-q4head.qpack | 256.1 | llama:qwen2@cuda | 8 | 192.3 | 103.6 | 
+b_g1a T0=88 others=0 after[clk,T]=455 MHz, 88 :: | E1b-trim80k-q4head.qpack | 256.1 | llama:qwen2@cuda | 8 | 88.8 | 74.9 | 
+b_h4 T0=88 others=0 after[clk,T]=455 MHz, 88 :: | E1b-trim80k-q4head.qpack | 256.1 | llama:qwen2@cuda | 8 | 81.9 | 74.9 | 
+b_m6 T0=88 others=0 after[clk,T]=455 MHz, 88 :: | E1b-trim80k-q4head.qpack | 256.1 | llama:qwen2@cuda | 8 | 82.7 | 75.5 | 
+b_m8 T0=88 others=0 after[clk,T]=455 MHz, 88 :: | E1b-trim80k-q4head.qpack | 256.1 | llama:qwen2@cuda | 8 | 78.8 | 73.2 | 
+b_g1a T0=88 others=0 after[clk,T]=455 MHz, 88 :: | E1b-trim80k-q4head.qpack | 256.1 | llama:qwen2@cuda | 8 | 88.8 | 74.9 | 
+b_h4 T0=88 others=0 after[clk,T]=455 MHz, 88 :: | E1b-trim80k-q4head.qpack | 256.1 | llama:qwen2@cuda | 8 | 81.9 | 74.9 | 
+b_m6 T0=88 others=0 after[clk,T]=455 MHz, 88 :: | E1b-trim80k-q4head.qpack | 256.1 | llama:qwen2@cuda | 8 | 82.6 | 75.5 | 
+b_m8 T0=88 others=0 after[clk,T]=455 MHz, 89 :: | E1b-trim80k-q4head.qpack | 256.1 | llama:qwen2@cuda | 8 | 78.8 | 73.2 | 
+b_g1a T0=89 others=0 after[clk,T]=455 MHz, 89 :: | E1b-trim80k-q4head.qpack | 256.1 | llama:qwen2@cuda | 8 | 88.8 | 74.9 | 
+b_h4 T0=89 others=0 after[clk,T]=455 MHz, 89 :: | E1b-trim80k-q4head.qpack | 256.1 | llama:qwen2@cuda | 8 | 81.9 | 74.9 | 
+b_m6 T0=89 others=0 after[clk,T]=455 MHz, 89 :: | E1b-trim80k-q4head.qpack | 256.1 | llama:qwen2@cuda | 8 | 82.7 | 75.5 | 
+b_m8 T0=89 others=0 after[clk,T]=455 MHz, 89 :: | E1b-trim80k-q4head.qpack | 256.1 | llama:qwen2@cuda | 8 | 78.8 | 73.2 | 
