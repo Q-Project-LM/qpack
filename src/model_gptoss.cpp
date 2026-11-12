@@ -66,6 +66,7 @@ class GptOss : public Model {
       std::vector<int> exact; if (mx.has(ls)) for (auto &x : mx[ls].arr) exact.push_back((int)x.as_int());
       const Tensor *gu = g("w_gate_up"), *dn = g("w_down"), *gur = c->get("layers." + ls + ".w_gate_up_r2"), *dnr = c->get("layers." + ls + ".w_down_r2");
       const Tensor *gux = c->get("layers." + ls + ".w_gate_up_x"), *dnx = c->get("layers." + ls + ".w_down_x");
+      std::vector<int> r2ids; const bool r2sel = cfg_["moe_r2"].has(ls); if (r2sel) for (auto &x : cfg_["moe_r2"][ls].arr) r2ids.push_back((int)x.as_int());
       const int nq = E_ - (int)exact.size(); int iq = 0;
       for (int e = 0; e < E_; e++) {
         auto it = std::find(exact.begin(), exact.end(), e);
@@ -75,8 +76,13 @@ class GptOss : public Model {
           ly.gu.push_back({expert_view(*gux, j, (int)exact.size())}); ly.dn.push_back({expert_view(*dnx, j, (int)exact.size())});
         } else {
           ly.gu.push_back({expert_view(*gu, iq, nq)}); ly.dn.push_back({expert_view(*dn, iq, nq)});
-          if (gur) ly.gu.back().push_back(expert_view(*gur, iq, nq));
-          if (dnr) ly.dn.back().push_back(expert_view(*dnr, iq, nq));
+          if (!r2sel) {   // second plane for every non-exact expert
+            if (gur) ly.gu.back().push_back(expert_view(*gur, iq, nq));
+            if (dnr) ly.dn.back().push_back(expert_view(*dnr, iq, nq));
+          } else {        // config "moe_r2": the experts that have a second plane, ascending, rows in that order
+            auto r = std::find(r2ids.begin(), r2ids.end(), e);
+            if (r != r2ids.end()) { const int j = (int)(r - r2ids.begin()); ly.gu.back().push_back(expert_view(*gur, j, (int)r2ids.size())); ly.dn.back().push_back(expert_view(*dnr, j, (int)r2ids.size())); }
+          }
           iq++;
         }
       }

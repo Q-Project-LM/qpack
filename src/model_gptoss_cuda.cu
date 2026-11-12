@@ -594,6 +594,7 @@ class GptOssCuda : public Model {
     auto T = [&](const char *n) { return c_->get("layers." + ls + "." + n); };
     const Tensor *gu = T("w_gate_up"), *dn = T("w_down"), *gur = T("w_gate_up_r2"), *dnr = T("w_down_r2"), *gux = T("w_gate_up_x"), *dnx = T("w_down_x");
     DT dgu, ddn, dgur, ddnr, dgux, ddnx;
+    std::vector<int> r2ids; const bool r2sel = cfg_["moe_r2"].has(ls); if (r2sel) for (auto &x : cfg_["moe_r2"][ls].arr) r2ids.push_back((int)x.as_int());
     const int nq = E_ - (int)exact.size(), nx = (int)exact.size();
     if (nq > 0) { dgu = up_exp(*gu); ddn = up_exp(*dn); if (gur) dgur = up_exp(*gur); if (dnr) ddnr = up_exp(*dnr); }
     if (nx > 0) { if (!gux || !dnx) throw std::runtime_error("cuda gptoss: exact experts listed without w_gate_up_x / w_down_x in layer " + ls); dgux = up_exp(*gux); ddnx = up_exp(*dnx); }
@@ -605,7 +606,13 @@ class GptOssCuda : public Model {
         plane(dgux, j, nx, &D.gq[0], &D.gs[0]); plane(ddnx, j, nx, &D.dq[0], &D.ds[0]);
       } else {
         D.kind = dgu.kind; D.np = 1; plane(dgu, iq, nq, &D.gq[0], &D.gs[0]); plane(ddn, iq, nq, &D.dq[0], &D.ds[0]);
-        if (gur) { if (dgur.kind != 1 || D.kind != 1) throw std::runtime_error("cuda gptoss: second planes must be q1"); D.np = 2; plane(dgur, iq, nq, &D.gq[1], &D.gs[1]); if (!dnr) throw std::runtime_error("cuda gptoss: *_r2 mismatch"); plane(ddnr, iq, nq, &D.dq[1], &D.ds[1]); }
+        if (gur) {   // second plane for every non-exact expert, or (config "moe_r2") only for the listed ones, rows in that order
+          if (dgur.kind != 1 || D.kind != 1) throw std::runtime_error("cuda gptoss: second planes must be q1");
+          if (!dnr) throw std::runtime_error("cuda gptoss: *_r2 mismatch");
+          int j = iq, nj = nq;
+          if (r2sel) { auto r = std::find(r2ids.begin(), r2ids.end(), e); j = r == r2ids.end() ? -1 : (int)(r - r2ids.begin()); nj = (int)r2ids.size(); }
+          if (j >= 0) { D.np = 2; plane(dgur, j, nj, &D.gq[1], &D.gs[1]); plane(ddnr, j, nj, &D.dq[1], &D.ds[1]); }
+        }
         iq++;
       }
       if (D.kind == 0 && (c_->get("layers." + ls + ".w_gate_up_x") == nullptr && gu->kind != Kind::Mxfp4)) throw std::runtime_error("cuda gptoss: expert kind");
