@@ -62,7 +62,7 @@ foreach(tool qpack-cli qpack-server qpack-bench qpack-quantize qpack-perplexity 
 endforeach()
 
 if(QPACK_CUDA)
-  foreach(tool qpack-cudacheck qpack-cudamv)
+  foreach(tool qpack-cudacheck qpack-cudamv qpack-cudadump)
     add_executable(${tool} tools/${tool}.cpp)
     target_link_libraries(${tool} PRIVATE qpack)
   endforeach()

@@ -1,0 +1,114 @@
+diff --git a/src/model_llama_cuda.cu b/src/model_llama_cuda.cu
+index 4583f7b..a920c62 100644
+--- a/src/model_llama_cuda.cu
++++ b/src/model_llama_cuda.cu
+@@ -29,7 +29,6 @@ namespace {
+ // at xq[0, cols) and xq[PLANE, PLANE + cols); a dot product costs two dp4a per 4 columns. (One int8 plane has ~1% relative error
+ // per matrix, which adds up to ~0.1 logit units over 24 layers.)
+ constexpr int PLANE = 8192;
+-constexpr int UN = 1;   // independent weight loads in flight per lane
+ enum { K_Q8 = 0, K_Q4 = 1, K_Q1 = 2, K_F16 = 3, K_F32 = 4 };
+ struct DMat { const void *q; const void *s; int rows, cols, kind; };
+ 
+@@ -54,8 +53,8 @@ __device__ __forceinline__ void warp_actq(float v, int g, int l, int8_t *xq, flo
+ 
+ // First batch of weight loads of a row, issued before the block's shared-memory fill / barrier so weight latency overlaps the
+ // activation staging (the small matrices are latency-bound).
+-struct Pre { uint4 v[UN]; unsigned short sc[UN]; float rs; };
+-__device__ __forceinline__ void preload(const DMat &m, int r, int l, Pre &p) {
++template <int UN> struct Pre { uint4 v[UN]; unsigned short sc[UN]; float rs; };   // UN = independent weight loads in flight per lane
++template <int UN> __device__ __forceinline__ void preload(const DMat &m, int r, int l, Pre<UN> &p) {
+   p.rs = 0;
+ #pragma unroll
+   for (int u = 0; u < UN; u++) { p.v[u] = make_uint4(0, 0, 0, 0); p.sc[u] = 0; }
+@@ -76,7 +75,7 @@ __device__ __forceinline__ void preload(const DMat &m, int r, int l, Pre &p) {
+ }
+ 
+ // dot product of weight row r with the quantised activations in shared memory; result in all lanes
+-__device__ __forceinline__ float row_dot(const DMat &m, int r, int l, const int4 *sx, const int4 *sl, const float *sxs, const int *sxsum, int np, const Pre &pre) {
++template <int UN> __device__ __forceinline__ float row_dot(const DMat &m, int r, int l, const int4 *sx, const int4 *sl, const float *sxs, const int *sxsum, int np, const Pre<UN> &pre) {
+   const int cols = m.cols; float acc = 0;
+   if (m.kind == K_Q4) {
+     const int G = cols >> 5;
+@@ -175,7 +174,7 @@ struct MvArgs {
+   const Ctl *ctl; const char *pfk, *pfv; int kvd;   // optional: prefetch the K / V cache of this layer (positions 0..pos) into L2
+ };
+ // up to three matrices sharing one input vector; warp per row
+-template <int WPB> __global__ void __launch_bounds__(WPB * 32) k_mv(MvArgs a) {
++template <int WPB, int UN = 1> __global__ void __launch_bounds__(WPB * 32) k_mv(MvArgs a) {
+   extern __shared__ int4 smem[];
+   if (a.pfk) {
+     const size_t bytes = (size_t)(a.ctl->pos + 1) * a.kvd * 2, nl = (bytes + 127) / 128;
+@@ -186,7 +185,7 @@ template <int WPB> __global__ void __launch_bounds__(WPB * 32) k_mv(MvArgs a) {
+   const int cols = a.cols, G = cols >> 5;
+   int4 *sx = smem, *sl = smem + (cols >> 4); float *sxs = (float *)(smem + 2 * (cols >> 4)); int *sxsum = (int *)(sxs + G);
+   int r = blockIdx.x * WPB + (threadIdx.x >> 5); const int l = threadIdx.x & 31;
+-  const bool valid = r < a.rowstart[a.nm]; int mi = 0; Pre pre;
++  const bool valid = r < a.rowstart[a.nm]; int mi = 0; Pre<UN> pre;
+   if (valid) { while (r >= a.rowstart[mi + 1]) mi++; r -= a.rowstart[mi]; preload(a.m[mi], r, l, pre); }
+   for (int i = threadIdx.x; i < (cols >> 4); i += WPB * 32) { sx[i] = ((const int4 *)a.xq)[i]; if (a.np == 2) sl[i] = ((const int4 *)(a.xq + PLANE))[i]; }
+   for (int i = threadIdx.x; i < G; i += WPB * 32) { sxs[i] = a.xs[i]; sxsum[i] = a.xsum[i]; }
+@@ -206,7 +205,7 @@ template <int NW> __global__ void __launch_bounds__(NW * 32) k_gateup(DMat g, DM
+   const int cols = g.cols, G = cols >> 5;
+   int4 *sx = smem, *sl = smem + (cols >> 4); float *sxs = (float *)(smem + 2 * (cols >> 4)); int *sxsum = (int *)(sxs + G); __shared__ float sh[32];
+   const int wp = threadIdx.x >> 5, l = threadIdx.x & 31;
+-  Pre pg, pu; { const int r0 = blockIdx.x * 32 + wp * (32 / NW); preload(g, r0, l, pg); preload(u, r0, l, pu); }
++  Pre<1> pg, pu; { const int r0 = blockIdx.x * 32 + wp * (32 / NW); preload(g, r0, l, pg); preload(u, r0, l, pu); }
+   for (int i = threadIdx.x; i < (cols >> 4); i += NW * 32) { sx[i] = ((const int4 *)xq)[i]; if (np == 2) sl[i] = ((const int4 *)(xq + PLANE))[i]; }
+   for (int i = threadIdx.x; i < G; i += NW * 32) { sxs[i] = xs[i]; sxsum[i] = xsum[i]; }
+   __syncthreads();
+@@ -281,7 +280,7 @@ template <int NW> __global__ void __launch_bounds__(NW * 32) k_gateup2(DMat g, D
+   const int cols = g.cols, G = cols >> 5;
+   int4 *sx = smem, *sl = smem + (cols >> 4); float *sxs = (float *)(smem + 2 * (cols >> 4)); int *sxsum = (int *)(sxs + G); __shared__ float sh[2][32];
+   const int wp = threadIdx.x >> 5, l = threadIdx.x & 31, up = wp & 1;
+-  const DMat &m = up ? u : g; Pre pre; preload(m, blockIdx.x * 32 + (wp >> 1) * RPW, l, pre);
++  const DMat &m = up ? u : g; Pre<1> pre; preload(m, blockIdx.x * 32 + (wp >> 1) * RPW, l, pre);
+   for (int i = threadIdx.x; i < (cols >> 4); i += NW * 32) { sx[i] = ((const int4 *)xq)[i]; if (np == 2) sl[i] = ((const int4 *)(xq + PLANE))[i]; }
+   for (int i = threadIdx.x; i < G; i += NW * 32) { sxs[i] = xs[i]; sxsum[i] = xsum[i]; }
+   __syncthreads();
+@@ -561,7 +560,7 @@ class LlamaCuda : public Model {
+   }
+   size_t smem_for(int cols) const { return 2 * (size_t)cols + (size_t)cols / 32 * 8; }
+ 
+-  void mv(cudaStream_t s, const DMat *m, const float *const *bias, float *const *out, int nm, int ai, int np, float *resid, const __half *pfk = nullptr, const __half *pfv = nullptr) {
++  void mv(cudaStream_t s, const DMat *m, const float *const *bias, float *const *out, int nm, int ai, int np, float *resid, const __half *pfk = nullptr, const __half *pfv = nullptr, int un = 1) {
+     MvArgs a{}; if (pfk && !getenv("QPACK_CUDA_NOPF")) { a.ctl = ctl_; a.pfk = (const char *)pfk; a.pfv = (const char *)pfv; a.kvd = kvd_; } a.nm = nm; a.cols = m[0].cols; a.np = np; a.xq = aq_[ai]; a.xs = as_[ai]; a.xsum = asum_[ai]; a.resid = resid; int tot = 0;
+     for (int i = 0; i < nm; i++) { a.m[i] = m[i]; a.bias[i] = bias ? bias[i] : nullptr; a.out[i] = out ? out[i] : nullptr; a.rowstart[i] = tot; tot += m[i].rows; }
+     a.rowstart[nm] = tot;
+@@ -569,7 +568,7 @@ class LlamaCuda : public Model {
+       case 2: k_mv<2><<<(tot + 1) / 2, 64, smem_for(a.cols), s>>>(a); break;
+       case 4: k_mv<4><<<(tot + 3) / 4, 128, smem_for(a.cols), s>>>(a); break;
+       case 16: k_mv<16><<<(tot + 15) / 16, 512, smem_for(a.cols), s>>>(a); break;
+-      default: k_mv<8><<<(tot + 7) / 8, 256, smem_for(a.cols), s>>>(a);
++      default: if (un == 2) k_mv<8, 2><<<(tot + 7) / 8, 256, smem_for(a.cols), s>>>(a); else if (un == 3) k_mv<8, 3><<<(tot + 7) / 8, 256, smem_for(a.cols), s>>>(a); else if (un == 5) k_mv<8, 5><<<(tot + 7) / 8, 256, smem_for(a.cols), s>>>(a); else k_mv<8><<<(tot + 7) / 8, 256, smem_for(a.cols), s>>>(a);
+     }
+   }
+   void norm(cudaStream_t s, const float *w, int ai, float *yf, int np) { k_norm_actq<<<1, 1024, 0, s>>>(x_, w, d_, eps_, aq_[ai], as_[ai], asum_[ai], yf, np); }
+@@ -603,16 +602,16 @@ class LlamaCuda : public Model {
+         case 32: k_gateup<32><<<ff_ / 32, 32 * 32, smem_for(d_), s>>>(ly.wg, ly.wu, aq_[0], as_[0], asum_[0], aq_[1], as_[1], asum_[1], P(1), P(3)); break;
+         default: break;
+       }
+-      { DMat m[1] = {ly.wd}; mv(s, m, nullptr, nullptr, 1, 1, P(3), x_); }
++      { DMat m[1] = {ly.wd}; mv(s, m, nullptr, nullptr, 1, 1, P(3), x_, nullptr, nullptr, und_); }
+     }
+     cudaGraph_t ga; CK(cudaStreamEndCapture(s, &ga)); CK(cudaGraphInstantiate(&ga_, ga, nullptr, nullptr, 0)); CK(cudaGraphDestroy(ga));
+     CK(cudaStreamBeginCapture(s, cudaStreamCaptureModeGlobal));
+     norm(s, fnorm_, 0, xn_, P(4));
+-    { DMat m[1] = {head_}; float *o[1] = {logits_}; mv(s, m, nullptr, o, 1, 0, P(4), nullptr); }
++    { DMat m[1] = {head_}; float *o[1] = {logits_}; mv(s, m, nullptr, o, 1, 0, P(4), nullptr, nullptr, nullptr, unh_); }
+     cudaGraph_t gb; CK(cudaStreamEndCapture(s, &gb)); CK(cudaGraphInstantiate(&gb_, gb, nullptr, nullptr, 0)); CK(cudaGraphDestroy(gb));
+     CK(cudaStreamBeginCapture(s, cudaStreamCaptureModeGlobal));   // greedy tail: final norm, head, device argmax (advances ctl)
+     norm(s, fnorm_, 0, nullptr, P(4));
+-    { DMat m[1] = {head_}; float *o[1] = {logits_}; mv(s, m, nullptr, o, 1, 0, P(4), nullptr); }
++    { DMat m[1] = {head_}; float *o[1] = {logits_}; mv(s, m, nullptr, o, 1, 0, P(4), nullptr, nullptr, nullptr, unh_); }
+     k_argmax1<<<AM_BLOCKS, 1024, 0, s>>>(logits_, V_, amv_, ami_); k_argmax2<<<1, 64, 0, s>>>(amv_, ami_, ctl_, out_);
+     cudaGraph_t gc; CK(cudaStreamEndCapture(s, &gc)); CK(cudaGraphInstantiate(&gc_, gc, nullptr, nullptr, 0)); CK(cudaGraphDestroy(gc));
+   }
+@@ -621,6 +620,7 @@ class LlamaCuda : public Model {
+   const int p1mask_ = getenv("QPACK_CUDA_P1") ? atoi(getenv("QPACK_CUDA_P1")) : 0;
+   const int dbg_ = getenv("QPACK_CUDA_DBG") ? atoi(getenv("QPACK_CUDA_DBG")) : 0;
+   const int gu3_ = getenv("QPACK_CUDA_GU3") ? atoi(getenv("QPACK_CUDA_GU3")) : 1;   // q4 gate/up: one row per warp, gate and up loads together
++  const int und_ = getenv("QPACK_CUDA_UND") ? atoi(getenv("QPACK_CUDA_UND")) : 1, unh_ = getenv("QPACK_CUDA_UNH") ? atoi(getenv("QPACK_CUDA_UNH")) : 1;
+   const int gu_nw_ = getenv("QPACK_CUDA_GU") ? atoi(getenv("QPACK_CUDA_GU")) : 8;
+   int d_, L_, nh_, nkv_, hd_, ff_, V_, ctx_, kvd_, qd_, nch_, pos_ = 0, slot_ = 0, pending_ = 0; float eps_;
+   cudaStream_t st_ = nullptr; cudaGraphExec_t ga_ = nullptr, gb_ = nullptr, gc_ = nullptr;

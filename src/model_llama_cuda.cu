@@ -220,6 +220,60 @@ template <int NW> __global__ void __launch_bounds__(NW * 32) k_gateup(DMat g, DM
   if (wp == 0) warp_actq(sh[l], blockIdx.x, l, hq, hs, hsum, npo);
 }
 
+// q4 dot of one 16-byte weight group per lane (lanes >= G hold nothing): activations of the lane's group are in registers
+struct LaneAct { int4 xl, xh, ll, lh; float sc; int sm8; };
+__device__ __forceinline__ LaneAct lane_act(const int4 *sx, const int4 *sl, const float *sxs, const int *sxsum, int g, int np) {
+  LaneAct a; a.xl = sx[2 * g]; a.xh = sx[2 * g + 1]; a.ll = a.lh = make_int4(0, 0, 0, 0); if (np == 2) { a.ll = sl[2 * g]; a.lh = sl[2 * g + 1]; }
+  a.sc = sxs[g]; a.sm8 = 8 * sxsum[g]; return a;
+}
+__device__ __forceinline__ float q4_dot1(const uint4 v, unsigned short sh, const LaneAct &a, int np, bool act) {
+  float val = 0.f;
+  if (act) {
+    const unsigned M = 0x0F0F0F0Fu;
+    const unsigned w0 = v.x & M, w1 = v.y & M, w2 = v.z & M, w3 = v.w & M, w4 = (v.x >> 4) & M, w5 = (v.y >> 4) & M, w6 = (v.z >> 4) & M, w7 = (v.w >> 4) & M;
+    int d = dp4a_us(w0, a.xl.x, 0); d = dp4a_us(w1, a.xl.y, d); d = dp4a_us(w2, a.xl.z, d); d = dp4a_us(w3, a.xl.w, d);
+    d = dp4a_us(w4, a.xh.x, d); d = dp4a_us(w5, a.xh.y, d); d = dp4a_us(w6, a.xh.z, d); d = dp4a_us(w7, a.xh.w, d);
+    if (np == 2) {
+      int e = dp4a_uu(w0, (unsigned)a.ll.x, 0); e = dp4a_uu(w1, (unsigned)a.ll.y, e); e = dp4a_uu(w2, (unsigned)a.ll.z, e); e = dp4a_uu(w3, (unsigned)a.ll.w, e);
+      e = dp4a_uu(w4, (unsigned)a.lh.x, e); e = dp4a_uu(w5, (unsigned)a.lh.y, e); e = dp4a_uu(w6, (unsigned)a.lh.z, e); e = dp4a_uu(w7, (unsigned)a.lh.w, e);
+      d = (d << 8) + e;
+    }
+    d -= a.sm8;
+    val = (float)d * (a.sc * h2f(sh));
+  }
+  return warp_sum(val);
+}
+
+// gate+up for q4 matrices with cols <= 1024 (one 16-byte group per lane): each warp issues the weight loads of ALL its rows up front
+// (2 * 32 / NW uint4 in flight per lane) and keeps its activation group in registers; arithmetic identical to k_gateup / row_dot.
+template <int NW> __global__ void __launch_bounds__(NW * 32) k_gateup3(DMat g, DMat u, const int8_t *xq, const float *xs, const int *xsum, int8_t *hq, float *hs, int *hsum, int np, int npo) {
+  extern __shared__ int4 smem[];
+  constexpr int RPW = 32 / NW;
+  const int cols = g.cols, G = cols >> 5;
+  int4 *sx = smem, *sl = smem + (cols >> 4); float *sxs = (float *)(smem + 2 * (cols >> 4)); int *sxsum = (int *)(sxs + G); __shared__ float sh[32];
+  const int wp = threadIdx.x >> 5, l = threadIdx.x & 31, r0 = blockIdx.x * 32 + wp * RPW;
+  uint4 pg[RPW], pu[RPW]; unsigned short sg[RPW], su[RPW];
+#pragma unroll
+  for (int i = 0; i < RPW; i++) {
+    pg[i] = pu[i] = make_uint4(0, 0, 0, 0); sg[i] = su[i] = 0;
+    if (l < G) {
+      pg[i] = __ldcs((const uint4 *)((const uint8_t *)g.q + (size_t)(r0 + i) * (cols >> 1)) + l); sg[i] = __ldg((const unsigned short *)g.s + (size_t)(r0 + i) * G + l);
+      pu[i] = __ldcs((const uint4 *)((const uint8_t *)u.q + (size_t)(r0 + i) * (cols >> 1)) + l); su[i] = __ldg((const unsigned short *)u.s + (size_t)(r0 + i) * G + l);
+    }
+  }
+  for (int i = threadIdx.x; i < (cols >> 4); i += NW * 32) { sx[i] = ((const int4 *)xq)[i]; if (np == 2) sl[i] = ((const int4 *)(xq + PLANE))[i]; }
+  for (int i = threadIdx.x; i < G; i += NW * 32) { sxs[i] = xs[i]; sxsum[i] = xsum[i]; }
+  __syncthreads();
+  const bool act = l < G; LaneAct a; if (act) a = lane_act(sx, sl, sxs, sxsum, l, np);
+#pragma unroll
+  for (int i = 0; i < RPW; i++) {
+    const float gg = q4_dot1(pg[i], sg[i], a, np, act), uu = q4_dot1(pu[i], su[i], a, np, act);
+    if (l == 0) sh[wp * RPW + i] = gg / (1.f + expf(-gg)) * uu;
+  }
+  __syncthreads();
+  if (wp == 0) warp_actq(sh[l], blockIdx.x, l, hq, hs, hsum, npo);
+}
+
 // variant: even warps compute gate rows, odd warps up rows (twice the warps in flight per block)
 template <int NW> __global__ void __launch_bounds__(NW * 32) k_gateup2(DMat g, DMat u, const int8_t *xq, const float *xs, const int *xsum, int8_t *hq, float *hs, int *hsum, int np, int npo) {
   extern __shared__ int4 smem[];
@@ -538,7 +592,8 @@ class LlamaCuda : public Model {
       else k_merge<128><<<nh_, 128, 0, s>>>(part_, ctl_, nch_, aq_[0], as_[0], asum_[0], P(2));
       { DMat m[1] = {ly.wo}; mv(s, m, nullptr, nullptr, 1, 0, P(2), x_); }
       norm(s, ly.fn, 0, nullptr, P(1));
-      switch (gu_nw_) {
+      if (gu3_ && ly.wg.kind == K_Q4 && ly.wu.kind == K_Q4 && d_ <= 1024) k_gateup3<32><<<ff_ / 32, 32 * 32, smem_for(d_), s>>>(ly.wg, ly.wu, aq_[0], as_[0], asum_[0], aq_[1], as_[1], asum_[1], P(1), P(3));
+      else switch (gu_nw_) {
         case 116: k_gateup2<16><<<ff_ / 32, 16 * 32, smem_for(d_), s>>>(ly.wg, ly.wu, aq_[0], as_[0], asum_[0], aq_[1], as_[1], asum_[1], P(1), P(3)); break;
         case 132: k_gateup2<32><<<ff_ / 32, 32 * 32, smem_for(d_), s>>>(ly.wg, ly.wu, aq_[0], as_[0], asum_[0], aq_[1], as_[1], asum_[1], P(1), P(3)); break;
         case 108: k_gateup2<8><<<ff_ / 32, 8 * 32, smem_for(d_), s>>>(ly.wg, ly.wu, aq_[0], as_[0], asum_[0], aq_[1], as_[1], asum_[1], P(1), P(3)); break;
@@ -565,6 +620,7 @@ class LlamaCuda : public Model {
   const int wpb_ = getenv("QPACK_CUDA_WPB") ? atoi(getenv("QPACK_CUDA_WPB")) : 8;
   const int p1mask_ = getenv("QPACK_CUDA_P1") ? atoi(getenv("QPACK_CUDA_P1")) : 0;
   const int dbg_ = getenv("QPACK_CUDA_DBG") ? atoi(getenv("QPACK_CUDA_DBG")) : 0;
+  const int gu3_ = getenv("QPACK_CUDA_GU3") ? atoi(getenv("QPACK_CUDA_GU3")) : 1;   // q4 gate/up: one row per warp, gate and up loads together
   const int gu_nw_ = getenv("QPACK_CUDA_GU") ? atoi(getenv("QPACK_CUDA_GU")) : 8;
   int d_, L_, nh_, nkv_, hd_, ff_, V_, ctx_, kvd_, qd_, nch_, pos_ = 0, slot_ = 0, pending_ = 0; float eps_;
   cudaStream_t st_ = nullptr; cudaGraphExec_t ga_ = nullptr, gb_ = nullptr, gc_ = nullptr;
