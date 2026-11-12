@@ -23,7 +23,7 @@ jobs:
         include:
           - { name: linux-x86_64, os: ubuntu-22.04 }   # AVX2 + FMA + F16C baseline
           - { name: linux-aarch64, os: ubuntu-22.04-arm }   # ARMv8.2 + dotprod + fp16
-          - { name: macos-arm64, os: macos-14 }
+          - { name: macos-arm64, os: macos-latest }
     steps:
       - uses: actions/checkout@v4
       - name: configure (portable, no -march=native)
