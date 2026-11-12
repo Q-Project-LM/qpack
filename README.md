@@ -146,6 +146,52 @@ the distribution. Qwen2.5-0.5B q4, 16 threads, greedy: rewriting a function 84 �
 answer 88 → 97 tok/s (×1.09). It pays off for models that are bound by memory bandwidth (hundreds of MB and up);
 N-Q-26M is so small that the extra work outweighs the saved weight reads, so it is off by default.
 
+## Comparison with llama.cpp (Qwen2.5-0.5B-Instruct, same model, newer measurements)
+
+Re-measured on one machine (Xeon E5-2683 v4, threads pinned; Tesla P4 for the GPU rows), llama.cpp commit `3f8af15`.
+Decode = 128 tokens at depth 128, prompt = 128 tokens; qpack numbers come from a small harness around the engine, llama.cpp
+from `llama-bench`; 5 interleaved rounds, the host was shared, so several rows have 5-10 % noise. Raw data and scripts:
+`research/` (J1) in the project notes. These results hold for this one model only.
+
+CPU decode, tok/s (4 / 8 / 16 threads):
+
+| format | MiB | 4 | 8 | 16 |
+|---|---|---|---|---|
+| qpack q4m | 352 | 45.6 | 67.4 | 77.4 |
+| qpack trim80k + q4 head + rANS | 232 | 54.4 | 83.9 | 90.9 |
+| qpack q8 | 480 | 36.0 | 53.2 | 57.1 |
+| llama.cpp Q4_K_M | 379 | 37.3 | 57.0 | 34.8 |
+| llama.cpp Q4_0 | 336 | 46.6 | 68.6 | 76.6 |
+| llama.cpp Q8_0 | 506 | 34.2 | 47.9 | 36.4 |
+
+llama.cpp's Q4_K_M and Q8_0 drop at 16 threads on this machine (reproducible, cause not found: not `--poll`, not core placement), so
+compare at each tool's best thread count. CPU prompt processing is **slower** in qpack for 4-bit formats (16 threads: q4m 405 vs
+Q4_K_M 443 and Q4_0 708 tok/s); q8 is about equal (530 vs 513).
+
+GPU decode on a Tesla P4 (all layers on the GPU, 64 tokens, 1113 MHz, no throttling; qpack's CUDA path was tuned on this card):
+
+| format | tok/s |
+|---|---|
+| qpack trim80k (232 MiB) | 257.8 |
+| qpack q4m | 226.7 |
+| qpack q8 | 190.4 |
+| llama.cpp Q4_0 / Q4_K_M / Q8_0 | 164.8 / 150.3 / 145.9 |
+
+Quality (bits per byte on four texts, context 512, relative to llama.cpp f16; noise about 0.3 %): qpack q8 +0.08 %, llama.cpp Q8_0
++0.14 %, llama.cpp Q4_K_M +1.50 %, qpack q4m +1.67 % (GPTQ, 4088 calibration tokens), llama.cpp Q4_0 +5.80 %, qpack trim80k
+(80k vocabulary, q4 head) +2.32 %. llama.cpp quants here were made without an importance matrix. At 4 bits qpack's edge is
+speed and a ~7 % smaller file, not quality.
+
+## Newer additions
+
+* **QPACK3** (`qpack-pack`): lossless rANS coding of 4-bit/8-bit blobs and scales, decoded at load; -9 % file size on Qwen, see
+  [QPACK2.md](QPACK2.md).
+* **gpt-oss-20b** (MoE, MXFP4) with 1-bit experts (`q1`) and a `mxfp4` kind, CPU and CUDA back ends; **CUDA** (`-DQPACK_CUDA=ON`,
+  `QPACK_DEVICE=cuda`, Pascal and newer) for the Llama family and gpt-oss.
+* Prebuilt binaries for Linux (x86_64, aarch64), macOS (arm64) and CUDA are built by `.github/workflows/build.yml`.
+* Released checkpoints: [Qwen2.5-0.5B-Instruct-qpack](https://huggingface.co/q-project/Qwen2.5-0.5B-Instruct-qpack),
+  [gpt-oss-20b-qpack-q1](https://huggingface.co/q-project/gpt-oss-20b-qpack-q1).
+
 ## Tests
 
 ```bash
