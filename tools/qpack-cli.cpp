@@ -39,6 +39,7 @@ int main(int argc, char **argv) {
     else if (a == "-n" || a == "--n-predict") n_predict = std::stoi(next());
     else if (a == "-c" || a == "--ctx") ctx = std::stoi(next());
     else if (a == "-t" || a == "--threads") qp::set_threads(std::stoi(next()));
+    else if (a == "--device") setenv("QPACK_DEVICE", next().c_str(), 1);
     else if (a == "--temp") sp.temperature = std::stof(next());
     else if (a == "--top-k") sp.top_k = std::stoi(next());
     else if (a == "--top-p") sp.top_p = std::stof(next());

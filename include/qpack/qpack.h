@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdlib>
+#include <cstdio>
 #include <algorithm>
 #include <functional>
 #include <memory>
@@ -137,6 +138,15 @@ class Model {
   virtual const float *prefill(const int *tokens, int n, int want = 1) {
     const float *r = nullptr; for (int i = 0; i < n; i++) r = step(tokens[i], i + 1 == n ? want : 0); return r;
   }
+  // n greedy (argmax) tokens starting from `token`, token i+1 = argmax of the logits after token i; out[i] = the argmax after
+  // feeding token i. The CUDA backend does this on the device without a host round trip per token.
+  virtual int greedy_run(int token, int n, int *out) {
+    for (int i = 0; i < n; i++) {
+      const float *l = step(token, 1); int b = 0; for (int v = 1; v < vocab(); v++) if (l[v] > l[b]) b = v;
+      out[i] = token = b;
+    }
+    return n;
+  }
   virtual void reset() = 0;
   // n tokens at once with the logits of every position (n x vocab) — verification of speculative tokens
   virtual void prefill_all(const int *tokens, int n, float *logits) {   // callers hold ExactBatches for bit-exact results
@@ -162,8 +172,12 @@ class Model {
 // opens any supported .qpack; max_ctx = 0 picks a default (4096, or the model's limit if smaller)
 std::unique_ptr<Model> load_model(const std::string &path, int max_ctx = 0);
 std::unique_ptr<Model> make_llama(std::shared_ptr<Container> c, int max_ctx);
+std::unique_ptr<Model> make_llama_cuda(std::shared_ptr<Container> c, int max_ctx);   // only with -DQPACK_CUDA=ON; selected by QPACK_DEVICE=cuda
+void cuda_matvec_bench(FILE *out);   // CUDA build only: q8 / q4 / q1 matvec bandwidth on Qwen2.5-0.5B shapes
 std::unique_ptr<Model> make_lfm3(std::shared_ptr<Container> c, int max_ctx);
 std::unique_ptr<Model> make_gptoss(std::shared_ptr<Container> c, int max_ctx);
+std::unique_ptr<Model> make_gptoss_cuda(std::shared_ptr<Container> c, int max_ctx);   // only with -DQPACK_CUDA=ON
+void cuda_gptoss_bench(FILE *out);   // CUDA build only
 std::unique_ptr<Model> make_nq(std::shared_ptr<Container> c, int max_ctx);
 
 // self-test stored in the container: top-1 must match and the top-5 logits must agree within tol

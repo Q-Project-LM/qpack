@@ -16,15 +16,17 @@
 static double now() { return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 
 int main(int argc, char **argv) {
-  std::string path, threads = "1,4,8,16", spec; int np = 128, ng = 128, reps = 2; bool row = false;
+  std::string path, threads = "1,4,8,16", spec; int np = 128, ng = 128, reps = 2; bool row = false, greedy = false;
   for (int i = 1; i < argc; i++) {
     std::string a = argv[i];
     if ((a == "-m" || a == "--model") && i + 1 < argc) path = argv[++i];
     else if (a == "-p" && i + 1 < argc) np = std::stoi(argv[++i]);
     else if (a == "-n" && i + 1 < argc) ng = std::stoi(argv[++i]);
     else if (a == "-t" && i + 1 < argc) threads = argv[++i];
+    else if (a == "--device" && i + 1 < argc) setenv("QPACK_DEVICE", argv[++i], 1);
     else if (a == "-r" && i + 1 < argc) reps = std::stoi(argv[++i]);
     else if (a == "--row") row = true;
+    else if (a == "--greedy") greedy = true;
     else if (a == "--spec" && i + 1 < argc) spec = argv[++i];
     else if (path.empty() && a[0] != '-') path = a;
     else { fprintf(stderr, "usage: qpack-bench -m model.qpack [-p 128] [-n 128] [-t 1,4,8,16] [-r 2] [--spec prompt.txt]\n"); return 2; }
@@ -39,7 +41,8 @@ int main(int argc, char **argv) {
       std::vector<int> toks(np); for (int i = 0; i < np; i++) toks[i] = 100 + (i * 37) % 5000;
       m->prefill(toks.data(), np, 1);
       double t1 = now();
-      for (int i = 0; i < ng; i++) m->step(100 + (i * 53) % 5000, 1);
+      if (greedy) { std::vector<int> o(ng); m->greedy_run(100, ng, o.data()); }
+      else for (int i = 0; i < ng; i++) m->step(100 + (i * 53) % 5000, 1);
       double t2 = now();
       pp = std::max(pp, np / (t1 - t0)); tg = std::max(tg, ng / (t2 - t1));
     }

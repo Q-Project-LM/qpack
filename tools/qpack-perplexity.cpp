@@ -17,6 +17,7 @@ int main(int argc, char **argv) {
     else if ((a == "-c" || a == "--ctx") && i + 1 < argc) ctx = std::stoi(argv[++i]);
     else if (a == "--chunks" && i + 1 < argc) chunks = std::stoi(argv[++i]);
     else if ((a == "-t" || a == "--threads") && i + 1 < argc) qp::set_threads(std::stoi(argv[++i]));
+    else if (a == "--device" && i + 1 < argc) setenv("QPACK_DEVICE", argv[++i], 1);
     else { fprintf(stderr, "usage: qpack-perplexity -m model.qpack -f text.txt [-c 512] [--chunks N] [-t threads]\n"); return 2; }
   }
   if (path.empty() || file.empty()) { fprintf(stderr, "usage: qpack-perplexity -m model.qpack -f text.txt [-c 512] [--chunks N] [-t threads]\n"); return 2; }

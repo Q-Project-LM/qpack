@@ -45,6 +45,7 @@ class GptOss : public Model {
     d_ = (int)cfg_["hidden_size"].as_int(); L_ = (int)cfg_["num_hidden_layers"].as_int(); nh_ = (int)cfg_["num_attention_heads"].as_int();
     nkv_ = (int)cfg_["num_key_value_heads"].as_int(); hd_ = (int)cfg_["head_dim"].as_int(64); ff_ = (int)cfg_["intermediate_size"].as_int();
     V_ = (int)cfg_["vocab_size"].as_int(); E_ = (int)cfg_["num_local_experts"].as_int(); K_ = (int)cfg_["num_experts_per_tok"].as_int(4);
+    if (const char *p = getenv("QPACK_LAYERS")) L_ = std::min(L_, atoi(p));   // debug: truncated model
     eps_ = (float)cfg_["rms_norm_eps"].as_num(1e-5); window_ = (int)cfg_["sliding_window"].as_int(128);
     limit_ = (float)cfg_["swiglu_limit"].as_num(7.0); alpha_ = (float)cfg_["swiglu_alpha"].as_num(1.702);
     if (hd_ != 64 || K_ > 8) throw std::runtime_error("gptoss: head_dim 64 and <= 8 experts per token expected");
