@@ -1,5 +1,6 @@
 // Llama-family decode step in WebAssembly (SIMD128, no libc): Llama / Qwen2 / Mistral / SmolLM style decoders
-// (RMSNorm, RoPE rotate-half, GQA, optional q/k/v bias, SwiGLU, tied or untied head). Weights f32 or QPACK2 q8.
+// (RMSNorm, RoPE rotate-half, GQA, optional q/k/v bias, SwiGLU, tied or untied head). Weights f32, QPACK2 q8 or q4
+// (groups of 32 columns: 16 bytes, byte j = column j low nibble / column j+16 high nibble, value - 8, one scale per group).
 //   clang --target=wasm32 -O3 -msimd128 -fno-builtin -nostdlib -Wl,--no-entry -Wl,--export=__heap_base \
 //         -Wl,--export-memory -Wl,--max-memory=4294967296 -o llama_core.wasm llama_core.c
 #include <wasm_simd128.h>
@@ -31,7 +32,7 @@ static void sincos_(double a, float *s, float *c) {
   *s = fsin_red(r); *c = fcos_red(r);
 }
 
-typedef struct { const float *f; const signed char *q; const float *s; int rows, cols; } T;
+typedef struct { const float *f; const signed char *q; const float *s; const unsigned char *q4; int rows, cols; } T;
 #define MAXL 128
 #define NSLOT 16
 enum { S_EMBED, S_LMHEAD, S_FNORM };
@@ -40,12 +41,35 @@ static T g_t[8 + MAXL * NSLOT];
 static T *ts(int s) { return &g_t[s]; }
 static T *tl(int l, int id) { return &g_t[8 + l * NSLOT + id]; }
 __attribute__((export_name("ll_set"))) void ll_set(int slot, const void *data, const float *scale, int rows, int cols) {
-  T *t = &g_t[slot]; t->rows = rows; t->cols = cols;
+  T *t = &g_t[slot]; t->rows = rows; t->cols = cols; t->q4 = 0;
   if (scale) { t->q = data; t->s = scale; t->f = 0; } else { t->f = data; t->q = 0; t->s = 0; }
+}
+__attribute__((export_name("ll_set4"))) void ll_set4(int slot, const void *data, const float *scale, int rows, int cols) {
+  T *t = &g_t[slot]; t->rows = rows; t->cols = cols; t->q4 = data; t->s = scale; t->f = 0; t->q = 0;
 }
 
 static short *g_xq; static int g_xq_n;
+// q4 x float (same as nq_core.c): int16 activations, each 32-column group unpacked to int16 and dotted, times its scale
+static void mv_q4(const T *t, const float *x, float *y, int rows, int cols) {
+  float mx = 0; for (int c = 0; c < cols; c++) { float a = x[c] < 0 ? -x[c] : x[c]; if (a > mx) mx = a; }
+  if (mx == 0) { for (int r = 0; r < rows; r++) y[r] = 0; return; }
+  float sx = mx / 32767.f, isx = 32767.f / mx;
+  for (int c = 0; c < cols; c++) { float v = x[c] * isx; g_xq[c] = (short)(v < 0 ? v - 0.5f : v + 0.5f); }
+  const int G = cols / 32; const v128_t m = wasm_i8x16_splat(15), e = wasm_i8x16_splat(8);
+  for (int r = 0; r < rows; r++) {
+    const unsigned char *q = t->q4 + (long)r * (cols / 2); const float *s = t->s + (long)r * G; v128_t acc = wasm_f32x4_splat(0);
+    for (int k = 0; k < G; k++) {
+      v128_t b = wasm_v128_load(q + 16 * k), lo = wasm_i8x16_sub(wasm_v128_and(b, m), e), hi = wasm_i8x16_sub(wasm_u8x16_shr(b, 4), e);
+      const short *xk = g_xq + 32 * k;
+      v128_t d = wasm_i32x4_add(wasm_i32x4_dot_i16x8(wasm_i16x8_extend_low_i8x16(lo), wasm_v128_load(xk)), wasm_i32x4_dot_i16x8(wasm_i16x8_extend_high_i8x16(lo), wasm_v128_load(xk + 8)));
+      d = wasm_i32x4_add(d, wasm_i32x4_add(wasm_i32x4_dot_i16x8(wasm_i16x8_extend_low_i8x16(hi), wasm_v128_load(xk + 16)), wasm_i32x4_dot_i16x8(wasm_i16x8_extend_high_i8x16(hi), wasm_v128_load(xk + 24))));
+      acc = wasm_f32x4_add(acc, wasm_f32x4_mul(wasm_f32x4_convert_i32x4(d), wasm_f32x4_splat(s[k])));
+    }
+    y[r] = (wasm_f32x4_extract_lane(acc, 0) + wasm_f32x4_extract_lane(acc, 1) + wasm_f32x4_extract_lane(acc, 2) + wasm_f32x4_extract_lane(acc, 3)) * sx;
+  }
+}
 static void mv(const T *t, const float *x, float *y, int rows, int cols) {
+  if (t->q4) { mv_q4(t, x, y, rows, cols); return; }
   if (t->q) {   // int16 activations x int8 weights (see nq_core.c)
     float mx = 0; for (int c = 0; c < cols; c++) { float a = x[c] < 0 ? -x[c] : x[c]; if (a > mx) mx = a; }
     if (mx == 0) { for (int r = 0; r < rows; r++) y[r] = 0; return; }
@@ -84,7 +108,11 @@ static void mv(const T *t, const float *x, float *y, int rows, int cols) {
 }
 static void row(const T *t, int i, float *out) {
   int n = t->cols;
-  if (t->q) { const signed char *q = t->q + (long)i * n; float s = t->s[i]; for (int c = 0; c < n; c++) out[c] = (float)q[c] * s; }
+  if (t->q4) {
+    const unsigned char *q = t->q4 + (long)i * (n / 2); const float *s = t->s + (long)i * (n / 32);
+    for (int k = 0; k < n / 32; k++) for (int j = 0; j < 16; j++) { unsigned char b = q[16 * k + j]; out[32 * k + j] = (float)((int)(b & 15) - 8) * s[k]; out[32 * k + j + 16] = (float)((int)(b >> 4) - 8) * s[k]; }
+  }
+  else if (t->q) { const signed char *q = t->q + (long)i * n; float s = t->s[i]; for (int c = 0; c < n; c++) out[c] = (float)q[c] * s; }
   else { const float *f = t->f + (long)i * n; for (int c = 0; c < n; c++) out[c] = f[c]; }
 }
 static void rmsnorm(const float *x, const float *w, int n, float eps, float *out) {
