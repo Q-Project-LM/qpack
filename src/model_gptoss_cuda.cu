@@ -114,10 +114,10 @@ __device__ __forceinline__ int q1_unit(unsigned w, const XU &x) {
 #define DMINB0 5
 #endif
 #ifndef DMINB1
-#define DMINB1 8
+#define DMINB1 5
 #endif
 #ifndef DMINB2
-#define DMINB2 8
+#define DMINB2 4
 #endif
 constexpr int DMINB[3] = {DMINB0, DMINB1, DMINB2};
 constexpr int NSE = 3;   // units per lane for the 90-unit expert rows
@@ -264,55 +264,60 @@ template <int K, int NP> __device__ __forceinline__ void gu_body(const ExpD &D, 
 #define GNR2 2
 #endif
 #ifndef GMINB1
-#define GMINB1 2
+#define GMINB1 3
 #endif
 #ifndef GMINB2
 #define GMINB2 2
 #endif
 constexpr int GNR[3] = {2, GNR1, GNR2}, GMINB[3] = {1, GMINB1, GMINB2};
 constexpr int gu_threads(int mode) { return mode == 0 ? GUT : 1024 / GNR[mode]; }
-template <int K, int NP, int NR> __device__ __forceinline__ void gu_body_n(const ExpD &D, int eid, const float *bgu, float limit, float alpha, int units, int ff, const int4 *aq, const float *as, const int *asum,
-                                                                           int8_t *hq, float *hs, int *hsum, int4 *sx, float *sxs, int *sxsum, float *sh) {
-  constexpr int T = 1024 / NR;
-  const int tid = threadIdx.x, wp = tid >> 5, lane = tid & 31, nb = blockIdx.x * 32 + wp * NR;
-  RR<K> row[NR][2][NP];
+// q1 expert matrices are stored in row groups of 4: word u of rows 4g..4g+3 is one 16-byte vector (bits), and the fp16 scales of the 23 column
+// groups of the four rows are one 8-byte vector each, so a lane reads 4 rows' worth of its unit with one wide load and reads each activation unit
+// from smem once for 4 rows.
+struct Q4 {
+  uint4 w[NSE]; uint2 s[NSE];
+  __device__ __forceinline__ void load(const void *q, const void *sc, size_t rg, int units, int lane) {
+    const int G = (units * 32 + 127) / 128; const uint4 *p = (const uint4 *)q + rg * (G * 4); const uint2 *sp = (const uint2 *)sc + rg * G;
 #pragma unroll
-  for (int n = 0; n < NR; n++)
-#pragma unroll
-    for (int q = 0; q < NP; q++) { row[n][0][q].load(D.gq[q], D.gs[q], 2 * (size_t)(nb + n), units, lane); row[n][1][q].load(D.gq[q], D.gs[q], 2 * (size_t)(nb + n) + 1, units, lane); }
-  for (int i = tid; i < 4 * units; i += T) { const int ph = i / units, u = i - ph * units; sx[ph * UMAX + u] = aq[ph * UMAX + u]; }
-  for (int i = tid; i < units; i += T) { sxs[i] = as[i]; sxsum[i] = asum[i]; }
-  __syncthreads();
-  float acc[NR][2][NP];
-#pragma unroll
-  for (int n = 0; n < NR; n++)
-#pragma unroll
-    for (int j = 0; j < 2; j++)
-#pragma unroll
-      for (int q = 0; q < NP; q++) acc[n][j][q] = 0;
-#pragma unroll
-  for (int i = 0; i < NSE; i++) {
-    const int u = lane + 32 * i;
-    if (u < units) {
-      const XU x = ldx(sx, u);
-#pragma unroll
-      for (int n = 0; n < NR; n++)
-#pragma unroll
-        for (int j = 0; j < 2; j++)
-#pragma unroll
-          for (int q = 0; q < NP; q++) acc[n][j][q] += row[n][j][q].term(i, x, sxs, sxsum, u);
-    }
+    for (int i = 0; i < NSE; i++) { const int u = lane + 32 * i; if (u < units) { w[i] = __ldcs(p + u); s[i] = __ldg(sp + (u >> 2)); } else { w[i] = make_uint4(0, 0, 0, 0); s[i] = make_uint2(0, 0); } }
   }
+  template <int RR_> __device__ __forceinline__ float term(int i, const XU &x, const float *sxs, int u) const {
+    const unsigned wd = RR_ == 0 ? w[i].x : RR_ == 1 ? w[i].y : RR_ == 2 ? w[i].z : w[i].w;
+    const unsigned sc = RR_ < 2 ? s[i].x : s[i].y;
+    return (float)q1_unit(wd, x) * (sxs[u] * h2f((unsigned short)((RR_ & 1) ? sc >> 16 : sc & 0xFFFFu)));
+  }
+};
+template <int NP> __device__ __forceinline__ void acc4(float (&acc)[4][NP], const Q4 (&r)[NP], const XU &x, const float *sxs, int i, int u) {
 #pragma unroll
-  for (int n = 0; n < NR; n++) {
+  for (int q = 0; q < NP; q++) { acc[0][q] += r[q].template term<0>(i, x, sxs, u); acc[1][q] += r[q].template term<1>(i, x, sxs, u); acc[2][q] += r[q].template term<2>(i, x, sxs, u); acc[3][q] += r[q].template term<3>(i, x, sxs, u); }
+}
+// gate/up, one warp = one row group = two neurons (gate, up, gate, up); block of GUT threads = 32 neurons
+template <int NP> __device__ __forceinline__ void gu_body_q(const ExpD &D, int eid, const float *bgu, float limit, float alpha, int units, int ff, const int4 *aq, const float *as,
+                                                            int8_t *hq, float *hs, int *hsum, int4 *sx, float *sxs, float *sh) {
+  const int tid = threadIdx.x, wp = tid >> 5, lane = tid & 31, rg = blockIdx.x * (GUT / 32) + wp;
+  Q4 row[NP];
+#pragma unroll
+  for (int q = 0; q < NP; q++) row[q].load(D.gq[q], D.gs[q], rg, units, lane);
+  for (int i = tid; i < 4 * units; i += GUT) { const int ph = i / units, u = i - ph * units; sx[ph * UMAX + u] = aq[ph * UMAX + u]; }
+  for (int i = tid; i < units; i += GUT) sxs[i] = as[i];
+  __syncthreads();
+  float acc[4][NP];
+#pragma unroll
+  for (int r = 0; r < 4; r++)
+#pragma unroll
+    for (int q = 0; q < NP; q++) acc[r][q] = 0;
+#pragma unroll
+  for (int i = 0; i < NSE; i++) { const int u = lane + 32 * i; if (u < units) acc4<NP>(acc, row, ldx(sx, u), sxs, i, u); }
+#pragma unroll
+  for (int n = 0; n < 2; n++) {
     float g = 0, u = 0;
 #pragma unroll
-    for (int q = 0; q < NP; q++) { g += acc[n][0][q]; u += acc[n][1][q]; }
+    for (int q = 0; q < NP; q++) { g += acc[2 * n][q]; u += acc[2 * n + 1][q]; }
     g = warp_sum(g); u = warp_sum(u);
     if (lane == 0) {
-      const int nn = nb + n; g += bgu[(size_t)eid * 2 * ff + 2 * nn]; u += bgu[(size_t)eid * 2 * ff + 2 * nn + 1];
+      const int nn = 2 * rg + n; g += bgu[(size_t)eid * 2 * ff + 2 * nn]; u += bgu[(size_t)eid * 2 * ff + 2 * nn + 1];
       const float gl = fminf(g, limit), ul = fmaxf(-limit, fminf(limit, u));
-      sh[wp * NR + n] = gl / (1.f + expf(-alpha * gl)) * (ul + 1.f);
+      sh[wp * 2 + n] = gl / (1.f + expf(-alpha * gl)) * (ul + 1.f);
     }
   }
   __syncthreads();
@@ -326,8 +331,8 @@ template <int MODE> __global__ void __launch_bounds__(gu_threads(MODE), GMINB[MO
   __shared__ int4 sx[4 * UMAX]; __shared__ float sxs[UMAX]; __shared__ int sxsum[UMAX]; __shared__ float sh[32];
   int8_t *q = hq + (size_t)k * ABYTES; float *s = hs + k * UMAX; int *sm = hsum + k * UMAX;
   if (MODE == 0) gu_body<0, 1>(D, eid, bgu, limit, alpha, units, ff, aq, as, asum, q, s, sm, sx, sxs, sxsum, sh);
-  else if (MODE == 1) gu_body_n<1, 1, GNR1>(D, eid, bgu, limit, alpha, units, ff, aq, as, asum, q, s, sm, sx, sxs, sxsum, sh);
-  else gu_body_n<1, 2, GNR2>(D, eid, bgu, limit, alpha, units, ff, aq, as, asum, q, s, sm, sx, sxs, sxsum, sh);
+  else if (MODE == 1) gu_body_q<1>(D, eid, bgu, limit, alpha, units, ff, aq, as, q, s, sm, sx, sxs, sh);
+  else gu_body_q<2>(D, eid, bgu, limit, alpha, units, ff, aq, as, q, s, sm, sx, sxs, sh);
 }
 // down projection of expert slot blockIdx.y, 8 * RPW rows per block (RPW rows per warp share each activation unit read from smem): ye[k][r] = wt[k] * (W h + b)
 constexpr int DRPW[3] = {DRPW0, DRPW1, DRPW2};
@@ -366,14 +371,50 @@ template <int K, int NP, int RPW> __device__ __forceinline__ void dn_body(const 
     if (lane == 0) ye[(size_t)blockIdx.y * d + r0 + rr] = wk * (a + bd[(size_t)eid * d + r0 + rr]);
   }
 }
+// q1 down: RG row groups (4 rows each) per warp, the loads of group g + 1 are issued before group g is computed
+template <int NP, int RG> __device__ __forceinline__ void dn_body_q(const ExpD &D, int eid, float wk, const float *bd, int units, int d, const int4 *aq, const float *as, float *ye, int4 *sx, float *sxs) {
+  const int tid = threadIdx.x, wp = tid >> 5, lane = tid & 31, rg0 = (blockIdx.x * 8 + wp) * RG;
+  Q4 cur[NP], nxt[NP];
+#pragma unroll
+  for (int q = 0; q < NP; q++) cur[q].load(D.dq[q], D.ds[q], rg0, units, lane);
+  for (int i = tid; i < 4 * units; i += 256) { const int ph = i / units, u = i - ph * units; sx[ph * UMAX + u] = aq[ph * UMAX + u]; }
+  for (int i = tid; i < units; i += 256) sxs[i] = as[i];
+  __syncthreads();
+#pragma unroll
+  for (int gi = 0; gi < RG; gi++) {
+    if (gi + 1 < RG) {
+#pragma unroll
+      for (int q = 0; q < NP; q++) nxt[q].load(D.dq[q], D.ds[q], rg0 + gi + 1, units, lane);
+    }
+    float acc[4][NP];
+#pragma unroll
+    for (int r = 0; r < 4; r++)
+#pragma unroll
+      for (int q = 0; q < NP; q++) acc[r][q] = 0;
+#pragma unroll
+    for (int i = 0; i < NSE; i++) { const int u = lane + 32 * i; if (u < units) acc4<NP>(acc, cur, ldx(sx, u), sxs, i, u); }
+#pragma unroll
+    for (int r = 0; r < 4; r++) {
+      float a = 0;
+#pragma unroll
+      for (int q = 0; q < NP; q++) a += acc[r][q];
+      a = warp_sum(a);
+      if (lane == 0) { const int row = 4 * (rg0 + gi) + r; ye[(size_t)blockIdx.y * d + row] = wk * (a + bd[(size_t)eid * d + row]); }
+    }
+    if (gi + 1 < RG) {
+#pragma unroll
+      for (int q = 0; q < NP; q++) cur[q] = nxt[q];
+    }
+  }
+}
 template <int MODE> __global__ void __launch_bounds__(256, DMINB[MODE]) k_down(const ExpD *tab, const int *sel, const float *wt, const float *bd, int units, int d, const int4 *aq, const float *as, const int *asum, float *ye) {
   const int k = blockIdx.y, eid = sel[k]; const ExpD D = tab[eid];
   if ((D.kind == 0 ? 0 : D.np == 1 ? 1 : 2) != MODE) return;
   __shared__ int4 sx[4 * UMAX]; __shared__ float sxs[UMAX]; __shared__ int sxsum[UMAX];
   const int4 *q = aq + (size_t)k * (ABYTES / 16); const float *s = as + k * UMAX; const int *sm = asum + k * UMAX;
   if (MODE == 0) dn_body<0, 1, DRPW0>(D, eid, wt[k], bd, units, d, q, s, sm, ye, sx, sxs, sxsum);
-  else if (MODE == 1) dn_body<1, 1, DRPW1>(D, eid, wt[k], bd, units, d, q, s, sm, ye, sx, sxs, sxsum);
-  else dn_body<1, 2, DRPW2>(D, eid, wt[k], bd, units, d, q, s, sm, ye, sx, sxs, sxsum);
+  else if (MODE == 1) dn_body_q<1, DRPW1>(D, eid, wt[k], bd, units, d, q, s, ye, sx, sxs);
+  else dn_body_q<2, DRPW2>(D, eid, wt[k], bd, units, d, q, s, ye, sx, sxs);
 }
 
 // ---- attention (head_dim 64, 8 q heads per kv head): block = (kv group, chunk of CH positions), 256 threads; scores: CH positions x 16 lanes (4
@@ -686,7 +727,19 @@ class GptOssCuda : public Model {
       }
     } else if (t.kind == Kind::Q1) {
       d.kind = 1; const size_t G = (d.C + 127) / 128; d.q = (char *)dalloc(d.R * G * 16); d.s = (char *)dalloc(d.R * G * 2);
-      copy_chunked(d.q, t.data, d.R * G * 16); copy_chunked(d.s, t.scale16, d.R * G * 2);
+      if (d.R % 4) throw std::runtime_error("cuda gptoss: q1 expert rows must be a multiple of 4");
+      {   // row groups of 4: [R/4][G * 4 words][4 rows] bits, [R/4][G][4 rows] fp16 scales
+        const size_t W = G * 4, CR = std::max<size_t>(4, ((16u << 20) / (G * 16)) & ~(size_t)3);
+        std::vector<uint32_t> bq(CR * W); std::vector<uint16_t> bs(CR * G);
+        for (size_t r0 = 0; r0 < d.R; r0 += CR) {
+          const size_t nr = std::min(CR, d.R - r0);
+          for (size_t r = 0; r < nr; r++) {
+            const uint32_t *o = (const uint32_t *)t.data + (r0 + r) * W; for (size_t u = 0; u < W; u++) bq[((r >> 2) * W + u) * 4 + (r & 3)] = o[u];
+            const uint16_t *os = (const uint16_t *)t.scale16 + (r0 + r) * G; for (size_t g = 0; g < G; g++) bs[((r >> 2) * G + g) * 4 + (r & 3)] = os[g];
+          }
+          CK(cudaMemcpy(d.q + r0 * G * 16, bq.data(), nr * W * 4, cudaMemcpyHostToDevice)); CK(cudaMemcpy(d.s + r0 * G * 2, bs.data(), nr * G * 2, cudaMemcpyHostToDevice));
+        }
+      }
     } else throw std::runtime_error("cuda gptoss: expert tensors must be mxfp4 or q1 (got " + t.name + ")");
     return d;
   }
@@ -780,7 +833,7 @@ class GptOssCuda : public Model {
       { DQ m[1] = {ly.wo}; dense(s, m, &ly.bo, nullptr, 1, qd_ / 32, aO, aO_s_, aO_sum_, x_); }
       k_norm<<<1, 1024, 0, s>>>(x_, ly.fn, nullptr, d_, eps_, aA_q_, aA_s_, aA_sum_, nullptr, ly.rw, ly.rb, E_, sel_, wt_);
       launch_gateup(s, ly.tab, ly.bgu, aA);
-      { const dim3 g0(d_ / (8 * DRPW0), NK), g1(d_ / (8 * DRPW1), NK), g2(d_ / (8 * DRPW2), NK);
+      { const dim3 g0(d_ / (8 * DRPW0), NK), g1(d_ / (32 * DRPW1), NK), g2(d_ / (32 * DRPW2), NK);
         kinds(s, [&](int m, cudaStream_t t) {
           if (m == 0) k_down<0><<<g0, 256, 0, t>>>(ly.tab, sel_, wt_, ly.bd, uff_, d_, aH, aH_s_, aH_sum_, ye_);
           else if (m == 1) k_down<1><<<g1, 256, 0, t>>>(ly.tab, sel_, wt_, ly.bd, uff_, d_, aH, aH_s_, aH_sum_, ye_);
@@ -840,7 +893,7 @@ void cuda_gptoss_bench(FILE *out) {
         if (v.kind == 0) k_gateup<0><<<g, GUT, 0, st>>>(dt, sl, bgu, 7.f, 1.702f, units, ff, a4, as, asum, hq, hs, hsum);
         else if (v.np == 1) k_gateup<1><<<g, gu_threads(1), 0, st>>>(dt, sl, bgu, 7.f, 1.702f, units, ff, a4, as, asum, hq, hs, hsum);
         else k_gateup<2><<<g, gu_threads(2), 0, st>>>(dt, sl, bgu, 7.f, 1.702f, units, ff, a4, as, asum, hq, hs, hsum); }
-      else { const dim3 g0(d / (8 * DRPW0), NK), g1(d / (8 * DRPW1), NK), g2(d / (8 * DRPW2), NK); const int *sl = sel + 4 * (i & 7); const int4 *h4 = (const int4 *)hq;
+      else { const dim3 g0(d / (8 * DRPW0), NK), g1(d / (32 * DRPW1), NK), g2(d / (32 * DRPW2), NK); const int *sl = sel + 4 * (i & 7); const int4 *h4 = (const int4 *)hq;
         if (v.kind == 0) k_down<0><<<g0, 256, 0, st>>>(dt, sl, wt, bd, units, d, h4, hs, hsum, ye);
         else if (v.np == 1) k_down<1><<<g1, 256, 0, st>>>(dt, sl, wt, bd, units, d, h4, hs, hsum, ye);
         else k_down<2><<<g2, 256, 0, st>>>(dt, sl, wt, bd, units, d, h4, hs, hsum, ye); }
