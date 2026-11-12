@@ -150,8 +150,7 @@ N-Q-26M is so small that the extra work outweighs the saved weight reads, so it 
 
 Re-measured on one machine (Xeon E5-2683 v4, threads pinned; Tesla P4 for the GPU rows), llama.cpp commit `3f8af15`.
 Decode = 128 tokens at depth 128, prompt = 128 tokens; qpack numbers come from a small harness around the engine, llama.cpp
-from `llama-bench`; 5 interleaved rounds, the host was shared, so several rows have 5-10 % noise. Raw data and scripts:
-`research/` (J1) in the project notes. These results hold for this one model only.
+from `llama-bench`; 5 interleaved rounds, the host was shared, so several rows have 5-10 % noise. Full tables, noise and caveats: [research/llama-comparison-qwen-0.5b.md](research/llama-comparison-qwen-0.5b.md). These results hold for this one model only.
 
 CPU decode, tok/s (4 / 8 / 16 threads):
 
