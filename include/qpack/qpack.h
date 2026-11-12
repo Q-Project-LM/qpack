@@ -42,6 +42,7 @@ struct Tensor {
   const float *scale = nullptr;        // q8: one float32 per row
   const uint16_t *scale16 = nullptr;   // q4 / q1: one fp16 per group of `group` columns, row-major [rows, cols / group]
   const uint8_t *scale8 = nullptr;     // mxfp4: one e8m0 byte (2^(e-127)) per group of 32 columns, row-major [rows, cols / 32]
+  bool q4_padded = false;              // q4 rows zero-padded to a multiple of 32 columns (n-gram table, row access only)
   int group = 0;                       // q4 group size (32), q1 group size (128; see QPACK2.md): byte j of a group holds columns j (low nibble) and j + 16
                                        // (high nibble), each stored as q + 8 with q in [-8, 7]
   std::vector<int64_t> orig_shape;     // q1/q4/q8 tensors stored as [E, R, C]: the file's shape (`shape` is then [E*R, C])

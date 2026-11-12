@@ -215,7 +215,7 @@ void gptq_q4(const qp::Tensor &t, const std::vector<float> &Hf, uint8_t *q, uint
 }  // namespace
 
 int main(int argc, char **argv) {
-  std::string in, out, type = "q4", calib; int calib_tokens = 4096; std::string q1_attn = "q8"; bool gptq = false, act_order = false, q4_head = false, q4m_last_half = false; std::set<std::string> keep;
+  std::string in, out, type = "q4", calib; int calib_tokens = 4096; std::string q1_attn = "q8"; bool gptq = false, act_order = false, q4_head = false, q4m_last_half = false, q4_table = false; std::set<std::string> keep;
   for (int i = 1; i < argc; i++) {
     std::string a = argv[i];
     if (a == "--type" && i + 1 < argc) type = argv[++i];
@@ -228,6 +228,7 @@ int main(int argc, char **argv) {
     else if (a == "--q1-attn" && i + 1 < argc) q1_attn = argv[++i];
     else if (a == "--gptq") gptq = true;
     else if (a == "--q4-head") q4_head = true;
+    else if (a == "--q4-table") q4_table = true;   // n-gram (PLE) table rows padded with zeros to a multiple of 32 columns
     else if (a == "--q4m-last-half") q4m_last_half = true;
     else if (a == "--act-order") act_order = true;
     else if (in.empty() && a[0] != '-') in = a;
@@ -259,7 +260,8 @@ int main(int argc, char **argv) {
       Json ent = Json::object(); ent.set("name", name); ent.set("shape", e["shape"]); ent.set("dtype", e["dtype"]);
       char b[16]; snprintf(b, sizeof b, "w%04d", k++); const std::string bid = b;
       // 2-D matrices, and 3-D [E, R, C] tensors (quantised as [E * R, C], never copied unquantised)
-      const bool matrix = t && (t->shape.size() == 2 || (t->shape.size() == 3 && t->kind != qp::Kind::Q8 && t->kind != qp::Kind::Q4 && t->kind != qp::Kind::Q1) || !t->orig_shape.empty()) && t->numel() >= 4096 &&
+      const bool is_conv = name.size() > 12 && name.compare(name.size() - 12, 12, ".conv.weight") == 0;   // depthwise conv taps [C, 1, K] (N-Q): kept as stored
+      const bool matrix = t && !is_conv && (t->shape.size() == 2 || (t->shape.size() == 3 && t->kind != qp::Kind::Q8 && t->kind != qp::Kind::Q4 && t->kind != qp::Kind::Q1) || !t->orig_shape.empty()) && t->numel() >= 4096 &&
                           (t->kind == qp::Kind::F32 || t->kind == qp::Kind::F16 || t->kind == qp::Kind::Q8 || t->kind == qp::Kind::Q4 || t->kind == qp::Kind::Q1);
       if (!matrix) {   // copied as stored (f16 tensors that are not matrices were widened to f32 at load: written as f32)
         if (t && t->kind == qp::Kind::F32 && kind == "f16") {
@@ -276,8 +278,10 @@ int main(int argc, char **argv) {
       t = &tv;
       const int rows = (int)t->rows(), cols = (int)t->cols();
       const bool q1type = type == "q1" || type == "q1m";
+      const bool is_table = name.size() > 16 && name.compare(name.size() - 16, 16, "ple.table.weight") == 0;
+      const int pcols = (cols + 31) / 32 * 32;
       const bool to_q1 = q1type && is_mlp(name) && !keep.count(name) && !(type == "q1m" && more_bits(name, n_layers, q4m_last_half));
-      const bool to_q4 = !to_q1 && ((q1type ? q1_attn == "q4" : (type == "q4" || (type == "q4m" && !more_bits(name, n_layers, q4m_last_half)))) && cols % 32 == 0 && !keep.count(name));
+      const bool to_q4 = !to_q1 && ((q1type ? q1_attn == "q4" : (type == "q4" || (type == "q4m" && !more_bits(name, n_layers, q4m_last_half)))) && (cols % 32 == 0 || (q4_table && is_table)) && !keep.count(name));
       if (to_q1 && t->kind == qp::Kind::Q1) {   // already q1: copied
         ent.set("kind", "q1"); ent.set("blob", copy_blob(e["blob"].as_str(), bid)); ent.set("scale", copy_blob(e["scale"].as_str(), bid)); ent.set("group", 128);
         n_q1 += t->numel(); tensors.push(ent); continue;
@@ -302,24 +306,24 @@ int main(int argc, char **argv) {
         n_q8 += t->numel(); tensors.push(ent); continue;
       }
       if (to_q4) {
-        const int G = cols / 32; std::string q((size_t)rows * cols / 2, '\0'), sc((size_t)rows * G * 2, '\0');
+        const int G = pcols / 32; std::string q((size_t)rows * pcols / 2, '\0'), sc((size_t)rows * G * 2, '\0');
         auto hit = cal.H.find(name);
         if (gptq && hit != cal.H.end()) {
           gptq_q4(*t, *hit->second, (uint8_t *)&q[0], (uint16_t *)&sc[0], act_order);
           blobs.push_back({bid + ".q4", std::move(q)}); blobs.push_back({bid + ".scale", std::move(sc)});
           ent.set("kind", "q4"); ent.set("blob", bid + ".q4"); ent.set("scale", bid + ".scale"); ent.set("group", 32); n_q4 += t->numel(); tensors.push(ent); continue;
         }
-        auto it = imp.find(name); std::vector<float> ones(cols, 1.f);
-        const float *im = it != imp.end() && (int)it->second.size() == cols ? it->second.data() : ones.data();
+        auto it = imp.find(name); std::vector<float> ones(pcols, 1.f);
+        const float *im = it != imp.end() && (int)it->second.size() == pcols ? it->second.data() : ones.data();
         qp::pool().parallel_for(rows, [&](int a, int b2) {
-          std::vector<float> row(cols);
+          std::vector<float> row(pcols, 0.f);
           for (int r = a; r < b2; r++) {
             qp::row_f32(*t, r, row.data());
-            for (int g = 0; g < G; g++) q4_group(row.data() + 32 * g, im + 32 * g, (uint8_t *)&q[(size_t)r * cols / 2 + 16 * g], (uint16_t *)&sc[((size_t)r * G + g) * 2]);
+            for (int g = 0; g < G; g++) q4_group(row.data() + 32 * g, im + 32 * g, (uint8_t *)&q[(size_t)r * pcols / 2 + 16 * g], (uint16_t *)&sc[((size_t)r * G + g) * 2]);
           }
         }, 4);
         blobs.push_back({bid + ".q4", std::move(q)}); blobs.push_back({bid + ".scale", std::move(sc)});
-        ent.set("kind", "q4"); ent.set("blob", bid + ".q4"); ent.set("scale", bid + ".scale"); ent.set("group", 32); n_q4 += t->numel();
+        ent.set("kind", "q4"); ent.set("blob", bid + ".q4"); ent.set("scale", bid + ".scale"); ent.set("group", 32); if (pcols != cols) ent.set("q4_padded", true); n_q4 += t->numel();
       } else {   // q8 from float (same rule as container.quantize_q8)
         std::string q((size_t)rows * cols, '\0'), sc((size_t)rows * 4, '\0');
         qp::pool().parallel_for(rows, [&](int a, int b2) {

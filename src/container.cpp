@@ -50,7 +50,7 @@ Container::Container(const std::string &path) {
     else if (kind == "i64") { t.kind = Kind::I64; t.data = p; }
     else if (kind == "q8") { t.kind = Kind::Q8; t.data = p; size_t sl; t.scale = (const float *)blob(e["scale"].as_str(), &sl); }
     else if (kind == "q4") {
-      t.kind = Kind::Q4; t.data = p; size_t sl; t.scale16 = (const uint16_t *)blob(e["scale"].as_str(), &sl); t.group = (int)e["group"].as_int(32);
+      t.kind = Kind::Q4; t.data = p; size_t sl; t.scale16 = (const uint16_t *)blob(e["scale"].as_str(), &sl); t.group = (int)e["group"].as_int(32); t.q4_padded = e.has("q4_padded");
       if (t.group != 32) throw std::runtime_error("q4 tensor " + t.name + ": only group 32 is supported");
     }
     else if (kind == "q1") {
@@ -71,7 +71,7 @@ Container::Container(const std::string &path) {
     if (t.shape.size() == 3 && (t.kind == Kind::Q8 || t.kind == Kind::Q4 || t.kind == Kind::Q1 || t.kind == Kind::Mxfp4)) {
       t.orig_shape = t.shape; t.shape = {t.shape[0] * t.shape[1], t.shape[2]};
     }
-    if (t.kind == Kind::Q4 && (t.shape.size() != 2 || t.shape[1] % 32 || t.shape[1] > 32768)) throw std::runtime_error("q4 tensor " + t.name + ": cols % 32 == 0 and cols <= 32768 required");
+    if (t.kind == Kind::Q4 && (t.shape.size() != 2 || (t.shape[1] % 32 && !t.q4_padded) || t.shape[1] > 32768)) throw std::runtime_error("q4 tensor " + t.name + ": cols % 32 == 0 and cols <= 32768 required");
     if (t.kind == Kind::Mxfp4 && (t.shape.size() != 2 || t.shape[1] % 32 || t.shape[1] > 32768)) throw std::runtime_error("mxfp4 tensor " + t.name + ": cols % 32 == 0 and cols <= 32768 required");
     if (t.kind == Kind::Q1 && t.shape.size() != 2) throw std::runtime_error("q1 tensor " + t.name + ": expected a 2-D or 3-D shape");
     // small f16 tensors (norms, biases, conv) are converted once so the model code can read them as float

@@ -77,6 +77,7 @@ int main(int argc, char **argv) {
     auto stats = [&](const qp::GenResult &r) {
       fprintf(stderr, "\n[prompt %d tok (%d cached) %.1f tok/s | gen %zu tok %.1f tok/s | %s]\n", r.prompt_tokens, r.reused,
               (r.prompt_tokens - r.reused) / std::max(r.prefill_s, 1e-9), r.ids.size(), r.ids.size() / std::max(r.decode_s, 1e-9), r.finish.c_str());
+      if (r.circuit_calls) fprintf(stderr, "[circuits: %d calls, %d failed]\n", (int)r.circuit_calls, (int)r.circuit_failed);
       if (r.drafted) fprintf(stderr, "[speculative: %d drafted, %d accepted, %d passes]\n", r.drafted, r.accepted, r.verify_passes);
     };
     if (have_prompt) {

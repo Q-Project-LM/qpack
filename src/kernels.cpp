@@ -150,9 +150,11 @@ void row_f32(const Tensor &W, int64_t r, float *out) {
     case Kind::F16: { const uint16_t *h = (const uint16_t *)W.data + r * n; for (int64_t i = 0; i < n; i++) out[i] = f16_to_f32(h[i]); break; }
     case Kind::Q8: { const int8_t *q = (const int8_t *)W.data + r * n; const float s = W.scale[r]; for (int64_t i = 0; i < n; i++) out[i] = q[i] * s; break; }
     case Kind::Q4: {
-      const uint8_t *q = (const uint8_t *)W.data + r * (n / 2); const uint16_t *s = W.scale16 + r * (n / 32);
-      for (int64_t k = 0; k < n / 32; k++) {
+      const int64_t np = (n + 31) / 32 * 32;   // q4_padded tensors (n-gram table): rows stored zero-padded to a multiple of 32
+      const uint8_t *q = (const uint8_t *)W.data + r * (np / 2); const uint16_t *s = W.scale16 + r * (np / 32);
+      for (int64_t k = 0; k < np / 32; k++) {
         const float sc = f16_to_f32(s[k]);
+        if (32 * k + 32 > n) { float tmp[32]; for (int j = 0; j < 16; j++) { const uint8_t b = q[16 * k + j]; tmp[j] = ((int)(b & 15) - 8) * sc; tmp[j + 16] = ((int)(b >> 4) - 8) * sc; } for (int64_t j = 32 * k; j < n; j++) out[j] = tmp[j - 32 * k]; break; }
         for (int j = 0; j < 16; j++) { const uint8_t b = q[16 * k + j]; out[32 * k + j] = ((int)(b & 15) - 8) * sc; out[32 * k + j + 16] = ((int)(b >> 4) - 8) * sc; }
       }
       break;
