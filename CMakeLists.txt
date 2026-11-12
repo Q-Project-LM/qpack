@@ -14,6 +14,9 @@ option(QPACK_NATIVE "optimise for the build machine (-march=native)" ${_native_d
 option(QPACK_BUILD_TOOLS "build the command line tools and tests" ON)
 if(QPACK_NATIVE)
   add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-march=native>)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
+  # portable x86-64 baseline (Haswell and newer): the AVX2 kernels need AVX2, FMA and F16C
+  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-mavx2> $<$<COMPILE_LANGUAGE:CXX>:-mfma> $<$<COMPILE_LANGUAGE:CXX>:-mf16c>)
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
   # portable AArch64 baseline: ARMv8.2 with the dot-product and fp16 extensions (Cortex-A55 / A76 and newer: phones, Galaxy Watch 8)
   add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-march=armv8.2-a+dotprod+fp16>)

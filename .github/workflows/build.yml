@@ -1,0 +1,92 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  TOOLS: qpack-cli qpack-server qpack-bench qpack-quantize qpack-perplexity qpack-pack
+
+jobs:
+  cpu:
+    name: cpu-${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x86_64, os: ubuntu-22.04 }   # AVX2 + FMA + F16C baseline
+          - { name: linux-aarch64, os: ubuntu-22.04-arm }   # ARMv8.2 + dotprod + fp16
+          - { name: macos-arm64, os: macos-14 }
+    steps:
+      - uses: actions/checkout@v4
+      - name: configure (portable, no -march=native)
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DQPACK_NATIVE=OFF
+      - name: build
+        run: cmake --build build -j 4
+      - name: smoke test
+        run: |
+          for t in $TOOLS; do test -x build/$t; done
+          build/qpack-cli --help
+      - name: package
+        run: |
+          d=qpack-${{ matrix.name }}
+          mkdir $d
+          for t in $TOOLS; do cp build/$t $d/; done
+          cp README.md QPACK2.md $d/
+          tar czf $d.tar.gz $d
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qpack-${{ matrix.name }}
+          path: qpack-${{ matrix.name }}.tar.gz
+
+  cuda:
+    # compile-only: GitHub runners have no GPU, so this checks the CUDA backend builds and packages it
+    name: cuda-linux-x86_64
+    runs-on: ubuntu-22.04
+    container: nvidia/cuda:12.4.1-devel-ubuntu22.04
+    steps:
+      - name: toolchain
+        run: apt-get update && apt-get install -y --no-install-recommends cmake g++ make ca-certificates
+      - uses: actions/checkout@v4
+      - name: configure
+        run: >
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DQPACK_NATIVE=OFF
+          -DQPACK_CUDA=ON -DQPACK_CUDA_ARCH="61;70;75;80;86"
+      - name: build
+        run: cmake --build build -j 4
+      - name: package
+        run: |
+          d=qpack-linux-x86_64-cuda
+          mkdir $d
+          for t in $TOOLS; do cp build/$t $d/; done
+          cp README.md QPACK2.md $d/
+          tar czf $d.tar.gz $d
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qpack-linux-x86_64-cuda
+          path: qpack-linux-x86_64-cuda.tar.gz
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [cpu, cuda]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: checksums
+        run: cd dist && sha256sum *.tar.gz > SHA256SUMS
+      - name: publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" dist/* --repo "${{ github.repository }}" --generate-notes
