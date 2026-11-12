@@ -28,7 +28,7 @@ the dense qwen4 ladder, the ternary hybrid and the Q-164M-style arch. Ternary we
 import json, mmap, os, struct, sys
 import numpy as np
 
-MAGIC, MAGIC2, ALIGN = b"QPACK1\0\0", b"QPACK2\0\0", 64   # QPACK2 = same layout + int8 'q8' tensors
+MAGIC, MAGIC2, MAGIC3, ALIGN = b"QPACK1\0\0", b"QPACK2\0\0", b"QPACK3\0\0", 64   # QPACK3 = QPACK2 + rANS-coded blobs (qpack-pack), see QPACK2.md   # QPACK2 = same layout + int8 'q8' tensors
 _LUT = None
 
 
@@ -68,13 +68,16 @@ def write_container(path, blobs, magic=None):
 class Container:
     def __init__(self, path):
         self.f = open(path, "rb"); self.mm = mmap.mmap(self.f.fileno(), 0, access=mmap.ACCESS_READ)
-        if self.mm[:8] not in (MAGIC, MAGIC2): raise ValueError("not a QPACK1/QPACK2 container: " + str(path))
-        self.version = 2 if self.mm[:8] == MAGIC2 else 1
+        if self.mm[:8] not in (MAGIC, MAGIC2, MAGIC3): raise ValueError("not a QPACK1/QPACK2/QPACK3 container: " + str(path))
+        self.version = {MAGIC: 1, MAGIC2: 2, MAGIC3: 3}[bytes(self.mm[:8])]
         n, _ = struct.unpack("<II", self.mm[8:16]); self.toc = {}
         for i in range(n):
             b = 16 + 72 * i; name = self.mm[b:b + 56].rstrip(b"\0").decode(); off, ln = struct.unpack("<QQ", self.mm[b + 56:b + 72]); self.toc[name] = (off, ln)
 
-    def blob(self, name): off, ln = self.toc[name]; return self.mm[off:off + ln]
+    def blob(self, name):
+        if self.version == 3 and name != "manifest.json" and name in self.json("manifest.json").get("encoded", ()):
+            raise ValueError(f"blob {name} is rANS-coded (QPACK3): run `qpack-pack in out --unpack` first")
+        off, ln = self.toc[name]; return self.mm[off:off + ln]
     def json(self, name): return json.loads(bytes(self.blob(name)).decode())
     def close(self): self.mm.close(); self.f.close()
 

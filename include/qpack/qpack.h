@@ -3,7 +3,9 @@
 //   Tensor     — f32 / f16 / q8 (int8 rows + float32 per-row scale) / q4 (4-bit groups + fp16 scale) / q1 (sign bits, group 128 + fp16 scale) / mxfp4 (E2M1 nibbles + e8m0 scale per 32) / i64, with matvec() kernels.
 //   Model      — one decode step at a time: Llama family (Llama, Qwen2, Mistral, SmolLM) and N-Q (Gated DeltaNet).
 #pragma once
+#include <atomic>
 #include <cstdint>
+#include <cstdlib>
 #include <algorithm>
 #include <functional>
 #include <memory>
@@ -50,11 +52,19 @@ struct Tensor {
   const float *f32() const { return (const float *)data; }
 };
 
+struct AlignedBuf {   // heap buffer for blobs decoded at load time (QPACK3)
+  uint8_t *p = nullptr; size_t len = 0;
+  AlignedBuf() = default;
+  AlignedBuf(AlignedBuf &&o) noexcept : p(o.p), len(o.len) { o.p = nullptr; o.len = 0; }
+  AlignedBuf(const AlignedBuf &) = delete;
+  ~AlignedBuf() { free(p); }
+};
+
 class Container {
  public:
   explicit Container(const std::string &path);
   ~Container();
-  int version() const { return version_; }                 // 1 or 2
+  int version() const { return version_; }                 // 1, 2 or 3 (3 = QPACK2 + rANS-coded blobs, decoded at load)
   bool has(const std::string &blob) const { return toc_.count(blob) > 0; }
   std::string text(const std::string &blob) const;
   Json json(const std::string &blob) const { return Json::parse(text(blob)); }
@@ -69,12 +79,14 @@ class Container {
  private:
   int fd_ = -1; uint8_t *map_ = nullptr; size_t size_ = 0; int version_ = 1;
   std::unordered_map<std::string, std::pair<uint64_t, uint64_t>> toc_;
+  std::unordered_map<std::string, AlignedBuf> decoded_;
+  void decode_blobs();
   Json manifest_, config_;
   std::unordered_map<std::string, Tensor> tensors_;
 };
 
 // writes a QPACK container (layout of python/qpack/container.py: header, table of contents, 64-byte aligned blobs)
-void write_container(const std::string &path, const std::vector<std::pair<std::string, std::string>> &blobs, bool qpack2 = true);
+void write_container(const std::string &path, const std::vector<std::pair<std::string, std::string>> &blobs, bool qpack2 = true, const char *magic = nullptr);   // magic: 8 bytes, e.g. "QPACK3\0\0"
 
 // ------------------------------------------------------------------ kernels
 // y[0..rows) = W x for a 2-D tensor (rows x cols); threaded over rows when the matrix is large enough.

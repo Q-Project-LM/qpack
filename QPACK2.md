@@ -27,6 +27,26 @@ head. `config.json`, `generation_config.json`, `tokenizer.json` and `selftest.js
 selftest of a QPACK2 file is computed on the dequantised model, so `python qpack.py --selftest model.q8.qpack` checks
 the runtime, not the rounding.
 
+## QPACK3: entropy-coded blobs (lossless, decoded at load)
+
+`qpack-pack in.qpack out.qpack` re-writes a QPACK2 file with magic `"QPACK3\0\0"` and `"format": "QPACK3"`; layout, TOC, tensor
+kinds and blob names are unchanged. The manifest gains `"encoded": [blob names...]`: those blobs hold a static rANS stream
+instead of the raw bytes, and the reader (`Container`, `src/container.cpp`, `include/qpack/rans.h`) decodes them once at
+load into 64-byte aligned heap buffers, so `blob()`, the tensors and every kernel see exactly the QPACK2 bytes
+(`qpack-pack --unpack` restores a byte-identical QPACK2 file). Coded: `.q4` (nibbles), `.q8` (bytes), fp16 `.scale` of q4
+(two byte planes); blobs that do not shrink are left raw. Blob layout (little endian):
+
+```
+u8 codec (1 bytes, 2 nibbles) | u8 planes | u32 raw_len | per plane: u32 comp_len | u16 freq[nsym] | u32 state[4] | bytes
+```
+
+Codec 1 splits the raw bytes into `planes` interleaved planes (byte `i` -> plane `i % planes`) and codes each as a 256-ary
+source; codec 2 codes each byte as two 16-ary symbols (low nibble first). rANS: 12-bit frequencies summing to 4096, 32-bit
+states renormalised bytewise to `[2^23, 2^31)`, 4 interleaved states (symbol `i` uses state `i & 3`), encoder runs backwards
+and the stream is stored in decode order; the 4 final states are the initial decoder states. Cost: decode of a 0.5B model is
+~1 s on 8 cores and the weights then live in anonymous memory instead of the page cache (no lazy mmap). The Python reader
+(`python/qpack/container.py`) refuses encoded blobs; unpack with `qpack-pack --unpack` first.
+
 ## Why
 
 * **Half the size.** N-Q-26M: 89.4 MiB (QPACK1, fp16 matrices) → 46.5 MiB.
