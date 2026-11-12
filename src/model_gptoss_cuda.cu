@@ -120,6 +120,12 @@ __device__ __forceinline__ int q1_unit(unsigned w, const XU &x) {
 #define DMINB2 4
 #endif
 constexpr int DMINB[3] = {DMINB0, DMINB1, DMINB2};
+#ifndef DRP_QKV
+#define DRP_QKV 2
+#endif
+#ifndef DRP_WO
+#define DRP_WO 2
+#endif
 constexpr int NSE = 3;   // units per lane for the 90-unit expert rows
 template <int K> struct RR;
 template <> struct RR<0> {   // mxfp4 row: 90 units of 16 bytes + 90 e8m0 scales
@@ -127,7 +133,13 @@ template <> struct RR<0> {   // mxfp4 row: 90 units of 16 bytes + 90 e8m0 scales
   __device__ __forceinline__ void load(const void *q, const void *s, size_t row, int units, int lane) {
     const uint4 *p = (const uint4 *)q + row * units; const unsigned char *sp = (const unsigned char *)s + row * units;
 #pragma unroll
-    for (int i = 0; i < NSE; i++) { const int u = lane + 32 * i; if (u < units) { w[i] = __ldcs(p + u); e[i] = sp[u]; } else { w[i] = make_uint4(0, 0, 0, 0); e[i] = 0; } }
+    for (int i = 0; i < NSE; i++) { const int u = lane + 32 * i; if (u < units) { w[i] = __ldcs(p + u);
+#ifdef STUB_MXSCALE
+ e[i] = 0x7c;
+#else
+ e[i] = sp[u];
+#endif
+ } else { w[i] = make_uint4(0, 0, 0, 0); e[i] = 0; } }
   }
   __device__ __forceinline__ float dot(const int4 *sx, const float *sxs, const int *sxsum, int units, int lane) const {
     float acc = 0;
@@ -136,21 +148,6 @@ template <> struct RR<0> {   // mxfp4 row: 90 units of 16 bytes + 90 e8m0 scales
     return acc;
   }
   __device__ __forceinline__ float term(int i, const XU &x, const float *sxs, const int *sxsum, int u) const { return (float)mx4_unit(w[i], x, sxsum[u]) * (sxs[u] * mx4_scale(e[i])); }
-};
-template <> struct RR<1> {   // q1 row: ceil(cols / 128) groups of 16 bytes of sign bits + one fp16 scale per group
-  unsigned w[NSE]; unsigned short s[NSE];
-  __device__ __forceinline__ void load(const void *q, const void *sc, size_t row, int units, int lane) {
-    const int G = (units * 32 + 127) / 128; const unsigned *p = (const unsigned *)q + row * G * 4; const unsigned short *sp = (const unsigned short *)sc + row * G;
-#pragma unroll
-    for (int i = 0; i < NSE; i++) { const int u = lane + 32 * i; if (u < units) { w[i] = __ldcs(p + u); s[i] = __ldg(sp + (u >> 2)); } else { w[i] = 0; s[i] = 0; } }
-  }
-  __device__ __forceinline__ float dot(const int4 *sx, const float *sxs, const int *, int units, int lane) const {
-    float acc = 0;
-#pragma unroll
-    for (int i = 0; i < NSE; i++) { const int u = lane + 32 * i; if (u < units) acc += (float)q1_unit(w[i], ldx(sx, u)) * (sxs[u] * h2f(s[i])); }
-    return acc;
-  }
-  __device__ __forceinline__ float term(int i, const XU &x, const float *sxs, const int *, int u) const { return (float)q1_unit(w[i], x) * (sxs[u] * h2f(s[i])); }
 };
 
 // ------------------------------------------------------------------ kernels
@@ -176,20 +173,31 @@ __global__ void __launch_bounds__(1024) k_norm(float *x, const float *w, const f
   for (int g = wp; g < (n >> 5); g += 32) warp_actq(sy[g * 32 + l], g, l, aq, xs, xsum);
   if (rw) {
     if (wp < E) {
-      const float4 *r4 = (const float4 *)(rw + (size_t)wp * n), *s4 = (const float4 *)sy; float a = 0;
-      for (int i = l; i < (n >> 2); i += 32) { const float4 r = r4[i], s = s4[i]; a += r.x * s.x + r.y * s.y + r.z * s.z + r.w * s.w; }
+      const float4 *r4 = (const float4 *)(rw + (size_t)wp * n), *s4 = (const float4 *)sy; float a = 0; const int n4 = n >> 2;
+      for (int i0 = l; i0 < n4; i0 += 32 * 8) {   // 8 independent loads in flight, accumulated in the original order
+        float4 r[8];
+#pragma unroll
+        for (int j = 0; j < 8; j++) { const int i = i0 + 32 * j; r[j] = i < n4 ? r4[i] : make_float4(0, 0, 0, 0); }
+#pragma unroll
+        for (int j = 0; j < 8; j++) { const int i = i0 + 32 * j; if (i < n4) { const float4 s = s4[i]; a += r[j].x * s.x + r[j].y * s.y + r[j].z * s.z + r[j].w * s.w; } }
+      }
       a = warp_sum(a); if (l == 0) lg[wp] = a + rb[wp];
     }
     __syncthreads();
-    if (t == 0) {
-      int idx[NK]; float v[NK];
+    if (wp == 0) {   // top-4 of the E logits (lowest index wins ties), softmax over the 4 -- one warp, lane = expert
+      float cur = l < E ? lg[l] : -3.4e38f; int idx[NK]; float v[NK];
+#pragma unroll
       for (int k = 0; k < NK; k++) {
-        int b = -1; for (int e = 0; e < E; e++) { bool used = false; for (int j = 0; j < k; j++) used |= idx[j] == e; if (!used && (b < 0 || lg[e] > lg[b])) b = e; }
-        idx[k] = b; v[k] = lg[b];
+        float bv = cur; int bi = l;
+#pragma unroll
+        for (int o = 16; o; o >>= 1) { const float ov = __shfl_xor_sync(~0u, bv, o); const int oi = __shfl_xor_sync(~0u, bi, o); if (ov > bv || (ov == bv && oi < bi)) { bv = ov; bi = oi; } }
+        idx[k] = bi; v[k] = bv; if (l == bi) cur = -3.4e38f;
       }
-      float mx = v[0], sum = 0; for (int k = 1; k < NK; k++) mx = fmaxf(mx, v[k]);
-      float p[NK]; for (int k = 0; k < NK; k++) { p[k] = expf(v[k] - mx); sum += p[k]; }
-      for (int k = 0; k < NK; k++) { sel[k] = idx[k]; wt[k] = p[k] / sum; }
+      if (l == 0) {
+        float mx = v[0], sum = 0; for (int k = 1; k < NK; k++) mx = fmaxf(mx, v[k]);
+        float p[NK]; for (int k = 0; k < NK; k++) { p[k] = expf(v[k] - mx); sum += p[k]; }
+        for (int k = 0; k < NK; k++) { sel[k] = idx[k]; wt[k] = p[k] / sum; }
+      }
     }
   }
 }
@@ -198,29 +206,40 @@ struct DenseArgs {
   DQ m[3]; const float *bias[3]; float *out[3]; int nm, rowstart[4]; int units;
   const int4 *aq; const float *as; const int *asum; float *resid;   // non-null: resid += y
 };
-// q8g matvec, warp per row, up to three matrices sharing the input vector
-template <int NS, int WPB> __global__ void __launch_bounds__(WPB * 32) k_dense(DenseArgs a) {
-  __shared__ int4 sx[4 * UMAX]; __shared__ float sxs[UMAX]; __shared__ int sxsum[UMAX];
-  const int units = a.units, tid = threadIdx.x, lane = tid & 31;
-  int r = blockIdx.x * WPB + (tid >> 5); const bool valid = r < a.rowstart[a.nm]; int mi = 0;
-  uint4 w0[NS], w1[NS]; unsigned short sc[NS];
-  if (valid) {
-    while (r >= a.rowstart[mi + 1]) mi++; r -= a.rowstart[mi];
-    const uint4 *wp = (const uint4 *)a.m[mi].w + (size_t)r * units * 2; const unsigned short *sp = a.m[mi].s + (size_t)r * units;
+// q8g matvec, warp per row, up to three matrices sharing the input vector; RPW rows per warp, the loads of row j + 1 are issued before row j is computed
+template <int NS> struct DW {
+  uint4 w0[NS], w1[NS]; unsigned short sc[NS]; int mi, r; bool valid;
+  __device__ __forceinline__ void load(const DenseArgs &a, int row, int lane) {
+    valid = row < a.rowstart[a.nm]; mi = 0;
+    if (valid) {
+      while (row >= a.rowstart[mi + 1]) mi++; r = row - a.rowstart[mi];
+      const uint4 *wp = (const uint4 *)a.m[mi].w + (size_t)r * a.units * 2; const unsigned short *sp = a.m[mi].s + (size_t)r * a.units;
 #pragma unroll
-    for (int i = 0; i < NS; i++) { const int u = lane + 32 * i; if (u < units) { w0[i] = __ldcs(wp + 2 * u); w1[i] = __ldcs(wp + 2 * u + 1); sc[i] = __ldg(sp + u); } else { w0[i] = w1[i] = make_uint4(0, 0, 0, 0); sc[i] = 0; } }
+      for (int i = 0; i < NS; i++) { const int u = lane + 32 * i; if (u < a.units) { w0[i] = __ldcs(wp + 2 * u); w1[i] = __ldcs(wp + 2 * u + 1); sc[i] = __ldg(sp + u); } else { w0[i] = w1[i] = make_uint4(0, 0, 0, 0); sc[i] = 0; } }
+    }
   }
+};
+template <int NS, int WPB, int RPW> __global__ void __launch_bounds__(WPB * 32) k_dense(DenseArgs a) {
+  __shared__ int4 sx[4 * UMAX]; __shared__ float sxs[UMAX]; __shared__ int sxsum[UMAX];
+  const int units = a.units, tid = threadIdx.x, lane = tid & 31, row0 = (blockIdx.x * WPB + (tid >> 5)) * RPW;
+  DW<NS> cur, nxt; cur.load(a, row0, lane);
   for (int i = tid; i < 4 * units; i += WPB * 32) { const int ph = i / units, u = i - ph * units; sx[ph * UMAX + u] = a.aq[ph * UMAX + u]; }
   for (int i = tid; i < units; i += WPB * 32) { sxs[i] = a.as[i]; sxsum[i] = a.asum[i]; }
   __syncthreads();
-  if (!valid) return;
-  float acc = 0;
 #pragma unroll
-  for (int i = 0; i < NS; i++) { const int u = lane + 32 * i; if (u < units) acc += (float)q8_unit(w0[i], w1[i], ldx(sx, u)) * (sxs[u] * h2f(sc[i])); }
-  const float y = warp_sum(acc);
-  if (lane == 0) {
-    float v = y; if (a.bias[mi]) v += a.bias[mi][r];
-    if (a.resid) a.resid[r] += v; else a.out[mi][r] = v;
+  for (int j = 0; j < RPW; j++) {
+    if (j + 1 < RPW) nxt.load(a, row0 + j + 1, lane);
+    if (cur.valid) {
+      float acc = 0;
+#pragma unroll
+      for (int i = 0; i < NS; i++) { const int u = lane + 32 * i; if (u < units) acc += (float)q8_unit(cur.w0[i], cur.w1[i], ldx(sx, u)) * (sxs[u] * h2f(cur.sc[i])); }
+      const float y = warp_sum(acc);
+      if (lane == 0) {
+        float v = y; if (a.bias[cur.mi]) v += a.bias[cur.mi][cur.r];
+        if (a.resid) a.resid[cur.r] += v; else a.out[cur.mi][cur.r] = v;
+      }
+    }
+    if (j + 1 < RPW) cur = nxt;
   }
 }
 
@@ -335,7 +354,6 @@ template <int MODE> __global__ void __launch_bounds__(gu_threads(MODE), GMINB[MO
   else gu_body_q<2>(D, eid, bgu, limit, alpha, units, ff, aq, as, q, s, sm, sx, sxs, sh);
 }
 // down projection of expert slot blockIdx.y, 8 * RPW rows per block (RPW rows per warp share each activation unit read from smem): ye[k][r] = wt[k] * (W h + b)
-constexpr int DRPW[3] = {DRPW0, DRPW1, DRPW2};
 template <int K, int NP, int RPW> __device__ __forceinline__ void dn_body(const ExpD &D, int eid, float wk, const float *bd, int units, int d, const int4 *aq, const float *as, const int *asum, float *ye, int4 *sx, float *sxs, int *sxsum) {
   const int tid = threadIdx.x, wp = tid >> 5, lane = tid & 31, r0 = (blockIdx.x * 8 + wp) * RPW;
   RR<K> row[RPW][NP];
@@ -789,11 +807,15 @@ class GptOssCuda : public Model {
     CK(cudaMemcpyAsync(ctl_, &c, sizeof(Ctl), cudaMemcpyHostToDevice, st_)); CK(cudaMemcpyAsync(x_, e, (size_t)d_ * 4, cudaMemcpyHostToDevice, st_));
     CK(cudaGraphLaunch(ga_, st_)); pos_++;
   }
-  void dense(cudaStream_t s, const DQ *m, const float *const *bias, float *const *out, int nm, int units, const int4 *aq, const float *as, const int *asum, float *resid) {
+  void dense(cudaStream_t s, const DQ *m, const float *const *bias, float *const *out, int nm, int units, const int4 *aq, const float *as, const int *asum, float *resid, int rpw = 1) {
     DenseArgs a{}; a.nm = nm; a.units = units; a.aq = aq; a.as = as; a.asum = asum; a.resid = resid; int tot = 0;
     for (int i = 0; i < nm; i++) { a.m[i] = m[i]; a.bias[i] = bias ? bias[i] : nullptr; a.out[i] = out ? out[i] : nullptr; a.rowstart[i] = tot; tot += m[i].rows; }
     a.rowstart[nm] = tot;
-    if (units <= 96) k_dense<3, 8><<<(tot + 7) / 8, 256, 0, s>>>(a); else k_dense<4, 8><<<(tot + 7) / 8, 256, 0, s>>>(a);
+    if (units <= 96) {
+      if (rpw == 2) k_dense<3, 8, 2><<<(tot + 15) / 16, 256, 0, s>>>(a); else k_dense<3, 8, 1><<<(tot + 7) / 8, 256, 0, s>>>(a);
+    } else {
+      if (rpw == 2) k_dense<4, 8, 2><<<(tot + 15) / 16, 256, 0, s>>>(a); else k_dense<4, 8, 1><<<(tot + 7) / 8, 256, 0, s>>>(a);
+    }
   }
   // the kernels of the three expert kinds touch disjoint experts: capture them as parallel branches of the graph (fork / join by events)
   template <class F> void kinds(cudaStream_t s, F f) {
@@ -826,11 +848,11 @@ class GptOssCuda : public Model {
     for (int l = 0; l < L_; l++) {
       const Layer &ly = layers_[l]; __half *kl = kc_ + (size_t)l * ctx_ * kvd_, *vl = vc_ + (size_t)l * ctx_ * kvd_;
       k_norm<<<1, 1024, 0, s>>>(x_, ly.an, l ? ye_ : nullptr, d_, eps_, aA_q_, aA_s_, aA_sum_, nullptr, nullptr, nullptr, 0, nullptr, nullptr);
-      { DQ m[3] = {ly.wq, ly.wk, ly.wv}; const float *b[3] = {ly.bq, ly.bk, ly.bv}; float *o[3] = {q_, k_, v_}; dense(s, m, b, o, 3, ud_, aA, aA_s_, aA_sum_, nullptr); }
+      { DQ m[3] = {ly.wq, ly.wk, ly.wv}; const float *b[3] = {ly.bq, ly.bk, ly.bv}; float *o[3] = {q_, k_, v_}; dense(s, m, b, o, 3, ud_, aA, aA_s_, aA_sum_, nullptr, DRP_QKV); }
       const int win = ly.sliding ? window_ : 0;
       k_attn<<<dim3(nkv_, ly.sliding ? (window_ + CH - 1) / CH : nch_), ANT, 0, s>>>(q_, k_, v_, cos_, sin_, kl, vl, part_, ctl_, nkv_, nch_, scl, win);
       k_merge<<<nh_, HD, 0, s>>>(part_, ly.sinks, ctl_, nch_, win, aO_q_, aO_s_, aO_sum_);
-      { DQ m[1] = {ly.wo}; dense(s, m, &ly.bo, nullptr, 1, qd_ / 32, aO, aO_s_, aO_sum_, x_); }
+      { DQ m[1] = {ly.wo}; dense(s, m, &ly.bo, nullptr, 1, qd_ / 32, aO, aO_s_, aO_sum_, x_, DRP_WO); }
       k_norm<<<1, 1024, 0, s>>>(x_, ly.fn, nullptr, d_, eps_, aA_q_, aA_s_, aA_sum_, nullptr, ly.rw, ly.rb, E_, sel_, wt_);
       launch_gateup(s, ly.tab, ly.bgu, aA);
       { const dim3 g0(d_ / (8 * DRPW0), NK), g1(d_ / (32 * DRPW1), NK), g2(d_ / (32 * DRPW2), NK);
