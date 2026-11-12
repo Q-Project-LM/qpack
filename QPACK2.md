@@ -40,7 +40,10 @@ load into 64-byte aligned heap buffers, so `blob()`, the tensors and every kerne
 u8 codec (1 bytes, 2 nibbles) | u8 planes | u32 raw_len | per plane: u32 comp_len | u16 freq[nsym] | u32 state[4] | bytes
 ```
 
-Codec 1 splits the raw bytes into `planes` interleaved planes (byte `i` -> plane `i % planes`) and codes each as a 256-ary
+`qpack-pack --only classes` (q4 q8 scales embed mx4 q8g q1) codes just some classes and leaves the rest raw and mmap-lazy; coded
+classes also cover mxfp4 data + e8m0 scales, q1 bits + fp16 scales, q8g bytes + scales, large f16 tensors (2 byte planes) and small
+f32 tensors (4 byte planes). Codec 3 = chunked blob for parallel decode of blobs > 32 MiB: `u8 3 | u8 0 | u32 raw_len |
+u32 chunk_raw (16 MiB) | u32 nchunks | u32 comp_len[nchunks] | chunks` (each a plain codec 1/2 blob). Codec 1 splits the raw bytes into `planes` interleaved planes (byte `i` -> plane `i % planes`) and codes each as a 256-ary
 source; codec 2 codes each byte as two 16-ary symbols (low nibble first). rANS: 12-bit frequencies summing to 4096, 32-bit
 states renormalised bytewise to `[2^23, 2^31)`, 4 interleaved states (symbol `i` uses state `i & 3`), encoder runs backwards
 and the stream is stored in decode order; the 4 final states are the initial decoder states. Cost: decode of a 0.5B model is

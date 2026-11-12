@@ -8,6 +8,8 @@
 #include <cstring>
 #include <stdexcept>
 #include <thread>
+#include <mutex>
+#include <atomic>
 #include <cstdlib>
 
 #include "qpack/qpack.h"
@@ -98,11 +100,19 @@ void Container::decode_blobs() {
     bufs[i].len = n; bufs[i].p = (uint8_t *)aligned_alloc(64, (n + 63) / 64 * 64 + 64);
     if (!bufs[i].p) throw std::runtime_error("out of memory decoding " + names[i]);
   }
-  std::atomic<size_t> next{0}; unsigned nt = std::max(1u, std::min(16u, std::thread::hardware_concurrency()));
-  std::vector<std::thread> th;
+  struct Task { size_t blob; const uint8_t *p; size_t len; size_t off; };   // one plain coded chunk (a whole blob if not chunked)
+  std::vector<Task> tasks;
+  for (size_t i = 0; i < names.size(); i++) {
+    size_t len; const uint8_t *p = blob(names[i], &len);
+    if (len && p[0] == 3) for (auto &c : rans::chunk_refs(p, len)) tasks.push_back({i, c.p, c.len, c.off});
+    else tasks.push_back({i, p, len, 0});
+  }
+  std::atomic<size_t> next{0}; unsigned nt = std::max(1u, std::min(32u, std::thread::hardware_concurrency()));
+  std::vector<std::thread> th; std::mutex mu;
   for (unsigned t = 0; t < nt; t++) th.emplace_back([&] {
-    for (size_t i; (i = next++) < names.size();) {
-      try { size_t len; const uint8_t *p = blob(names[i], &len); rans::decode(p, len, bufs[i].p); } catch (std::exception &e) { errs[i] = e.what(); }
+    for (size_t i; (i = next++) < tasks.size();) {
+      try { rans::decode(tasks[i].p, tasks[i].len, bufs[tasks[i].blob].p + tasks[i].off); }
+      catch (std::exception &e) { std::lock_guard<std::mutex> g(mu); errs[tasks[i].blob] = e.what(); }
     }
   });
   for (auto &t : th) t.join();

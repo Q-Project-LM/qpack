@@ -31,8 +31,11 @@ inline std::vector<uint8_t> encode_plane(const std::vector<uint8_t> &sym, int ns
       if (!h[i]) continue;
       uint32_t v = (uint32_t)((h[i] * kProbScale) / tot); if (v == 0) v = 1; f[i] = v; sum += v; if (h[i] > h[big]) big = i;
     }
-    f[big] += (uint32_t)(kProbScale - sum);   // may be negative only if many tiny symbols; big symbol is large enough in practice
-    if ((int32_t)f[big] < 1) throw std::runtime_error("rans: cannot normalise frequencies");
+    int64_t nb = (int64_t)f[big] + (int64_t)kProbScale - sum;
+    if (nb >= 1) f[big] = (uint32_t)nb;
+    else {   // many near-uniform symbols (high-entropy data): trim the largest frequencies one by one until the total is 4096
+      for (int64_t d = sum - kProbScale; d > 0; d--) { int m = 0; for (int i = 1; i < nsym; i++) if (f[i] > f[m]) m = i; if (f[m] <= 1) throw std::runtime_error("rans: cannot normalise frequencies"); f[m]--; }
+    }
   }
   for (int i = 0; i < nsym; i++) c[i + 1] = c[i] + f[i];
   std::vector<uint8_t> rev;   // bytes in reverse order
@@ -87,8 +90,29 @@ inline std::vector<uint8_t> encode(const uint8_t *raw, size_t n, int codec, int 
 
 inline size_t raw_size(const uint8_t *p, size_t len) { if (len < 6) throw std::runtime_error("rans: short blob"); return get32(p + 2); }
 
+// Chunked blob (codec 3): u8 3 | u8 0 | u32 raw_len | u32 chunk_raw | u32 nchunks | u32 comp_len[nchunks] | chunks, each a plain
+// blob (codec 1/2) of chunk_raw raw bytes (last one shorter). chunk_raw is a multiple of 4. Lets big blobs decode in parallel.
+inline std::vector<uint8_t> assemble_chunked(size_t n, size_t chunk_raw, const std::vector<std::vector<uint8_t>> &chunks) {
+  std::vector<uint8_t> o; o.push_back(3); o.push_back(0); put32(o, (uint32_t)n); put32(o, (uint32_t)chunk_raw); put32(o, (uint32_t)chunks.size());
+  for (auto &c : chunks) put32(o, (uint32_t)c.size());
+  for (auto &c : chunks) o.insert(o.end(), c.begin(), c.end());
+  return o;
+}
+struct ChunkRef { const uint8_t *p; size_t len; size_t off; };   // coded chunk and its offset in the raw output
+inline std::vector<ChunkRef> chunk_refs(const uint8_t *p, size_t len) {
+  if (len < 14) throw std::runtime_error("rans: short chunked blob");
+  size_t cr = get32(p + 6), nc = get32(p + 10), pos = 14 + 4 * nc; std::vector<ChunkRef> r;
+  if (pos > len) throw std::runtime_error("rans: truncated chunk table");
+  for (size_t i = 0; i < nc; i++) {
+    size_t cl = get32(p + 14 + 4 * i); if (pos + cl > len) throw std::runtime_error("rans: truncated chunk");
+    r.push_back({p + pos, cl, i * cr}); pos += cl;
+  }
+  return r;
+}
+
 // out must hold raw_size bytes
 inline void decode(const uint8_t *p, size_t len, uint8_t *out) {
+  if (len >= 1 && p[0] == 3) { for (auto &c : chunk_refs(p, len)) decode(c.p, c.len, out + c.off); return; }
   size_t n = raw_size(p, len); int codec = p[0], planes = p[1]; size_t pos = 6;
   if (codec == 2) {
     if (n) memset(out, 0, n);
