@@ -9,7 +9,7 @@ Contents: manifest.json, config.json, generation_config.json, tokenizer.json, se
   integer buffers      -> <id>.i64    (n-gram hash sizes / offsets / multipliers: must be exact)
   QPACK2 only: int8    -> <id>.q8 + <id>.scale (int8 rows, float32 scale per row; pack_model(quant='q8'))
                int4    -> <id>.q4 + <id>.scale (groups of 32 columns: 16 bytes, byte j = column j in the low nibble and
-                          column j+16 in the high one, stored as q+8, q in [-8, 7]; fp16 scale per group; written by
+                          column j+16 in the high one, stored as q+8, q in [-8, 7]; fp16 scale per group of 32/64/128 columns, manifest "group"; written by
                           the C++ tool qpack-quantize)
   1-D float tensors    -> <id>.f32    (norms, decay params, unigram prior: tiny, kept exact)
   everything else      -> <id>.f16 (default) or .f32 (--dense f32)
@@ -85,12 +85,12 @@ def quantize_q8(w):
     return q, scale.astype(np.float32)
 
 
-def dequant_q4(data, scale, shape):
-    """q4 blobs (see the module docstring) -> float32 array of `shape` [rows, cols], cols a multiple of 32."""
+def dequant_q4(data, scale, shape, group=32):
+    """q4 blobs (see the module docstring) -> float32 array of `shape` [rows, cols], cols a multiple of `group` (32, 64 or 128: one fp16 scale per `group` columns, nibbles keep the 32-column layout)."""
     rows, cols = shape[0], int(np.prod(shape[1:]))
     b = np.frombuffer(data, dtype=np.uint8).reshape(rows, cols // 32, 16)
     q = np.concatenate([(b & 15).astype(np.int8) - 8, (b >> 4).astype(np.int8) - 8], axis=2).astype(np.float32)   # [rows, groups, 32]
-    s = np.frombuffer(scale, dtype=np.float16).astype(np.float32).reshape(rows, cols // 32, 1)
+    s = np.repeat(np.frombuffer(scale, dtype=np.float16).astype(np.float32).reshape(rows, cols // group), group // 32, axis=1).reshape(rows, cols // 32, 1)
     return np.ascontiguousarray((q * s).reshape(shape))
 
 

@@ -77,15 +77,22 @@ static inline void unpack_q4(const uint8_t *p, __m256i &lo, __m256i &hi) {
   lo = _mm256_cvtepi8_epi16(_mm_sub_epi8(_mm_and_si128(b, m), e));
   hi = _mm256_cvtepi8_epi16(_mm_sub_epi8(_mm_and_si128(_mm_srli_epi16(b, 4), m), e));
 }
-void rows_q4(const uint8_t *Q, const uint16_t *S, const int16_t *xq, const float *bs, float *y, int r0, int r1, int cols) {
+// scales of the 32-column groups: one fp16 per 32 << gs columns, expanded to one float per 32-column group (exact)
+static inline void group_scales(const uint16_t *s, int G, int gs, float *out) {
+  int k = 0;
+  if (gs == 0) for (; k + 8 <= G; k += 8) _mm256_storeu_ps(out + k, _mm256_cvtph_ps(_mm_loadu_si128((const __m128i *)(s + k))));
+  for (; k < G; k++) out[k] = _cvtsh_ss(s[k >> gs]);
+}
+void rows_q4(const uint8_t *Q, const uint16_t *S, const int16_t *xq, const float *bs, float *y, int r0, int r1, int cols, int gs) {
   const int G = cols / 32;
-  float bsx[1024], comb[1024];   // activation block scale per group, and group scale x block scale (cols <= 32768)
+  float bsx[1024], comb[1024], sf[1024];   // activation block scale per group, and group scale x block scale (cols <= 32768)
   for (int k = 0; k < G; k++) bsx[k] = bs[k >> 2];
   for (int r = r0; r < r1; r++) {
-    const uint8_t *q = Q + (int64_t)r * (cols / 2); const uint16_t *s = S + (int64_t)r * G;
+    const uint8_t *q = Q + (int64_t)r * (cols / 2); const uint16_t *s = S + (int64_t)r * (G >> gs);
+    group_scales(s, G, gs, sf);
     int k = 0;
-    for (; k + 8 <= G; k += 8) _mm256_storeu_ps(comb + k, _mm256_mul_ps(_mm256_cvtph_ps(_mm_loadu_si128((const __m128i *)(s + k))), _mm256_loadu_ps(bsx + k)));
-    for (; k < G; k++) comb[k] = _cvtsh_ss(s[k]) * bsx[k];
+    for (; k + 8 <= G; k += 8) _mm256_storeu_ps(comb + k, _mm256_mul_ps(_mm256_loadu_ps(sf + k), _mm256_loadu_ps(bsx + k)));
+    for (; k < G; k++) comb[k] = sf[k] * bsx[k];
     __m256 a0 = _mm256_setzero_ps(), a1 = a0; k = 0;
     for (; k + 2 <= G; k += 2) {
       __m256i l0, h0, l1, h1; unpack_q4(q + 16 * k, l0, h0); unpack_q4(q + 16 * k + 16, l1, h1);
@@ -128,14 +135,15 @@ void row_q8_multi(const int8_t *Q, const float *scale, const int16_t *XQ, int ld
     Y[(int64_t)j * ldy + r] = acc[j] * scale[r];
   }
 }
-void row_q4_multi(const uint8_t *Q, const uint16_t *S, const int16_t *XQ, int ldq, const float *BS, int nbs, float *Y, int ldy, int r, int nt, int cols) {
-  const int G = cols / 32; const uint8_t *q = Q + (int64_t)r * (cols / 2); const uint16_t *s = S + (int64_t)r * G;
-  float comb[4][1024];
+void row_q4_multi(const uint8_t *Q, const uint16_t *S, const int16_t *XQ, int ldq, const float *BS, int nbs, float *Y, int ldy, int r, int nt, int cols, int gs) {
+  const int G = cols / 32; const uint8_t *q = Q + (int64_t)r * (cols / 2); const uint16_t *s = S + (int64_t)r * (G >> gs);
+  float comb[4][1024], sf[1024];
+  group_scales(s, G, gs, sf);
   for (int j = 0; j < nt; j++) {
     const float *bs = BS + (int64_t)j * nbs; float bsx[1024]; for (int k = 0; k < G; k++) bsx[k] = bs[k >> 2];
     int k = 0;
-    for (; k + 8 <= G; k += 8) _mm256_storeu_ps(comb[j] + k, _mm256_mul_ps(_mm256_cvtph_ps(_mm_loadu_si128((const __m128i *)(s + k))), _mm256_loadu_ps(bsx + k)));
-    for (; k < G; k++) comb[j][k] = _cvtsh_ss(s[k]) * bsx[k];
+    for (; k + 8 <= G; k += 8) _mm256_storeu_ps(comb[j] + k, _mm256_mul_ps(_mm256_loadu_ps(sf + k), _mm256_loadu_ps(bsx + k)));
+    for (; k < G; k++) comb[j][k] = sf[k] * bsx[k];
   }
   __m256 a0[4], a1[4]; for (int j = 0; j < nt; j++) a0[j] = a1[j] = _mm256_setzero_ps();
   int k = 0;
@@ -219,15 +227,14 @@ void mm_q8(const int8_t *Q, const float *scale, const int16_t *XQ, const float *
     for (; b < B; b++) rows_q8(Q, scale, XQ + (int64_t)b * ldq, BS + (int64_t)b * nb, Y + (int64_t)b * ldy, r, r + 1, cols);
   }
 }
-void mm_q4(const uint8_t *Q, const uint16_t *S, const int16_t *XQ, const float *BS, int ldq, int nb, int B, float *Y, int ldy, int r0, int r1, int cols) {
+void mm_q4(const uint8_t *Q, const uint16_t *S, const int16_t *XQ, const float *BS, int ldq, int nb, int B, float *Y, int ldy, int r0, int r1, int cols, int gs) {
   const int G = cols / 32;
   std::vector<float> bsx((size_t)B * G), comb(4 * (size_t)G), sw(G);   // per vector: activation block scale per group
   for (int b = 0; b < B; b++) for (int k = 0; k < G; k++) bsx[(size_t)b * G + k] = BS[(size_t)b * nb + (k >> 2)];
   for (int r = r0; r < r1; r++) {
-    const uint8_t *q = Q + (int64_t)r * (cols / 2); const uint16_t *s = S + (int64_t)r * G;
+    const uint8_t *q = Q + (int64_t)r * (cols / 2); const uint16_t *s = S + (int64_t)r * (G >> gs);
     int k = 0;
-    for (; k + 8 <= G; k += 8) _mm256_storeu_ps(sw.data() + k, _mm256_cvtph_ps(_mm_loadu_si128((const __m128i *)(s + k))));
-    for (; k < G; k++) sw[k] = _cvtsh_ss(s[k]);
+    group_scales(s, G, gs, sw.data());
     int b = 0;
     for (; b + 4 <= B; b += 4) {
       const int16_t *x0 = XQ + (int64_t)b * ldq, *x1 = x0 + ldq, *x2 = x1 + ldq, *x3 = x2 + ldq;
@@ -243,7 +250,7 @@ void mm_q4(const uint8_t *Q, const uint16_t *S, const int16_t *XQ, const float *
       }
       Y[(int64_t)b * ldy + r] = hsum256(f0); Y[(int64_t)(b + 1) * ldy + r] = hsum256(f1); Y[(int64_t)(b + 2) * ldy + r] = hsum256(f2); Y[(int64_t)(b + 3) * ldy + r] = hsum256(f3);
     }
-    for (; b < B; b++) rows_q4(Q, S, XQ + (int64_t)b * ldq, BS + (int64_t)b * nb, Y + (int64_t)b * ldy, r, r + 1, cols);
+    for (; b < B; b++) rows_q4(Q, S, XQ + (int64_t)b * ldq, BS + (int64_t)b * nb, Y + (int64_t)b * ldy, r, r + 1, cols, gs);
   }
 }
 

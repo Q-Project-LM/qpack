@@ -14,7 +14,7 @@ blobs   each aligned to 64 bytes
 | kind | blobs | value |
 |---|---|---|
 | `q8` (new) | `wNNNN.q8` int8 `[rows, cols]` row-major + `wNNNN.scale` float32 `[rows]` | `W[r, c] = q[r, c] * scale[r]`, `q ∈ [-127, 127]`, `scale[r] = max_c |W[r, c]| / 127` |
-| `q4` | `wNNNN.q4` uint8 `[rows, cols / 2]` + `wNNNN.scale` fp16 `[rows, cols / 32]`; manifest `"group": 32` | groups of 32 columns, 16 bytes each: byte `j` holds column `j` (low nibble) and column `j + 16` (high nibble) as `q + 8`, `q ∈ [-8, 7]`; `W[r, 32g + c] = q * scale[r, g]`. Requires `cols % 32 == 0`. Written by `qpack-quantize` |
+| `q4` | `wNNNN.q4` uint8 `[rows, cols / 2]` + `wNNNN.scale` fp16 `[rows, cols / group]`; manifest `"group": 32` (default), `64` or `128` | nibbles are stored in blocks of 32 columns, 16 bytes each: byte `j` holds column `j` (low nibble) and column `j + 16` (high nibble) as `q + 8`, `q ∈ [-8, 7]`; `W[r, c] = q * scale[r, c / group]` (group 64 / 128: one scale shared by 2 / 4 consecutive 32-blocks). Requires `cols % group == 0`. Written by `qpack-quantize` |
 | `f16` / `f32` | `wNNNN.f16` / `.f32` | dense tensors (1-D tensors — norms, decay parameters — are always f32) |
 | `i64` | `wNNNN.i64` | integer buffers (n-gram hash table sizes, offsets, multipliers): must be exact |
 | `tern5`, `bits` | as in QPACK1 | ternary weights, frozen fingerprints (Q-architecture checkpoints) |

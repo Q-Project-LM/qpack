@@ -29,30 +29,31 @@ float from_f16(uint16_t h) { return qp::f16_to_f32(h); }
 
 // one group of 32 weights -> 16 bytes + fp16 scale, minimum squared error weighted by imp (importance of each input
 // column: mean squared activation from calibration text, or 1)
-void q4_group(const float *w, const float *imp, uint8_t *out, uint16_t *scale) {
+void q4_group(const float *w, const float *imp, uint8_t *out, uint16_t *scale, int gsz = 32) {
   float amax = 0, m = 0;
-  for (int i = 0; i < 32; i++) if (std::fabs(w[i]) > amax) { amax = std::fabs(w[i]); m = w[i]; }
-  int q[32], bq[32];
-  if (amax == 0) { std::fill(bq, bq + 32, 0); *scale = 0; }
+  for (int i = 0; i < gsz; i++) if (std::fabs(w[i]) > amax) { amax = std::fabs(w[i]); m = w[i]; }
+  int q[128], bq[128], q2[128];
+  if (amax == 0) { std::fill(bq, bq + gsz, 0); *scale = 0; }
   else {
     float best = INFINITY; uint16_t bs = 0;
     auto try_scale = [&](float s) {
       const uint16_t h = to_f16(s); const float sh = from_f16(h); if (sh == 0 || !std::isfinite(sh)) return;
       float err = 0, wq = 0, qq = 0;
-      for (int i = 0; i < 32; i++) { q[i] = std::max(-8, std::min(7, (int)std::lrintf(w[i] / sh))); const float d = w[i] - q[i] * sh; err += imp[i] * d * d; wq += imp[i] * w[i] * q[i]; qq += imp[i] * q[i] * q[i]; }
-      if (err < best) { best = err; bs = h; std::copy(q, q + 32, bq); }
+      for (int i = 0; i < gsz; i++) { q[i] = std::max(-8, std::min(7, (int)std::lrintf(w[i] / sh))); const float d = w[i] - q[i] * sh; err += imp[i] * d * d; wq += imp[i] * w[i] * q[i]; qq += imp[i] * q[i] * q[i]; }
+      if (err < best) { best = err; bs = h; std::copy(q, q + gsz, bq); }
       if (qq > 0) {   // least-squares refit of the scale for these levels
         const uint16_t h2 = to_f16(wq / qq); const float s2 = from_f16(h2); if (s2 == 0 || !std::isfinite(s2)) return;
-        float e2 = 0; int q2[32];
-        for (int i = 0; i < 32; i++) { q2[i] = std::max(-8, std::min(7, (int)std::lrintf(w[i] / s2))); const float d = w[i] - q2[i] * s2; e2 += imp[i] * d * d; }
-        if (e2 < best) { best = e2; bs = h2; std::copy(q2, q2 + 32, bq); }
+        float e2 = 0;
+        for (int i = 0; i < gsz; i++) { q2[i] = std::max(-8, std::min(7, (int)std::lrintf(w[i] / s2))); const float d = w[i] - q2[i] * s2; e2 += imp[i] * d * d; }
+        if (e2 < best) { best = e2; bs = h2; std::copy(q2, q2 + gsz, bq); }
       }
     };
     for (int k = 0; k <= 12; k++) try_scale(m / (7.f + 0.125f * k));      // extreme value on the +7 side
     for (int k = 0; k <= 12; k++) try_scale(-m / (7.5f + 0.125f * k));   // extreme value on the -8 side
     *scale = bs;
   }
-  for (int j = 0; j < 16; j++) out[j] = (uint8_t)((bq[j] + 8) | ((bq[j + 16] + 8) << 4));
+  // the nibbles keep the 32-column layout: sub-block s = columns 32s..32s+31 -> 16 bytes
+  for (int s = 0; s < gsz / 32; s++) for (int j = 0; j < 16; j++) out[16 * s + j] = (uint8_t)((bq[32 * s + j] + 8) | ((bq[32 * s + j + 16] + 8) << 4));
 }
 
 std::unique_ptr<qp::Model> make(std::shared_ptr<qp::Container> c) {
@@ -70,7 +71,7 @@ bool more_bits(const std::string &name, int n_layers, bool last_half) {
   if (last_half) return i >= n_layers / 2;
   return i < n_layers / 8 || i >= 7 * n_layers / 8 || (i - n_layers / 8) % 3 == 2;
 }
-const char *kUsage = "usage: qpack-quantize in.qpack out.qpack [--type q4|q4m|q8] [--keep-q8 name,...] [--q4-head] [--q4m-last-half] [--calib text.txt [--gptq [--act-order]]] [--calib-tokens 4096] [-t threads]\n";
+const char *kUsage = "usage: qpack-quantize in.qpack out.qpack [--type q4|q4m|q8] [--keep-q8 name,...] [--q4-head] [--group 32|64|128] [--group-mlp 32|64|128] [--q4m-last-half] [--calib text.txt [--gptq [--act-order]]] [--calib-tokens 4096] [-t threads]\n";
 
 // statistics of every matrix input from running the source model over calibration text: mean squared activation per
 // column (importance), and with gptq the second moment H = sum x x^T (shared by matrices reading the same input)
@@ -134,8 +135,8 @@ Calib calibrate(const std::string &model_path, const std::string &text_path, int
 // scale is chosen when the quantiser reaches its first column, from the already corrected weights.
 // act_order: columns are visited by decreasing H_ii (most sensitive first); a group's scale is still fixed when its first
 // column comes up, from the corrected weights of the whole (original) group, so the file layout does not change.
-void gptq_q4(const qp::Tensor &t, const std::vector<float> &Hf, uint8_t *q, uint16_t *sc, bool act_order) {
-  const int rows = (int)t.rows(), n = (int)t.cols(), G = n / 32;
+void gptq_q4(const qp::Tensor &t, const std::vector<float> &Hf, uint8_t *q, uint16_t *sc, bool act_order, int gsz = 32) {
+  const int rows = (int)t.rows(), n = (int)t.cols(), G = n / gsz;
   std::vector<int> perm(n), pos(n); for (int i = 0; i < n; i++) perm[i] = i;
   if (act_order) std::stable_sort(perm.begin(), perm.end(), [&](int a, int b) { return Hf[(size_t)a * n + a] > Hf[(size_t)b * n + b]; });
   for (int p = 0; p < n; p++) pos[perm[p]] = p;
@@ -175,12 +176,12 @@ void gptq_q4(const qp::Tensor &t, const std::vector<float> &Hf, uint8_t *q, uint
       for (int r = 0; r < nr; r++) { qp::row_f32(t, r0 + r, row.data()); for (int p = 0; p < n; p++) w[(size_t)r * n + p] = dead[perm[p]] ? 0.f : row[perm[p]]; }
       std::fill(have.begin(), have.end(), 0);
       for (int p = 0; p < n; p++) {
-        const int i = perm[p], g = i / 32, j = i % 32;
+        const int i = perm[p], g = i / gsz, j = i % 32, sb = i / 32;
         if (!have[g]) {   // the group's scale from its corrected (not yet quantised) weights
           have[g] = 1;
           for (int r = 0; r < nr; r++) {
-            float gw[32]; for (int c = 0; c < 32; c++) gw[c] = w[(size_t)r * n + pos[32 * g + c]];
-            uint8_t tmp[16]; uint16_t h; q4_group(gw, imp.data() + 32 * g, tmp, &h);
+            float gw[128]; for (int c = 0; c < gsz; c++) gw[c] = w[(size_t)r * n + pos[gsz * g + c]];
+            uint8_t tmp[64]; uint16_t h; q4_group(gw, imp.data() + gsz * g, tmp, &h, gsz);
             sc[(size_t)(r0 + r) * G + g] = h; sg[(size_t)r * G + g] = qp::f16_to_f32(h);
           }
         }
@@ -188,7 +189,7 @@ void gptq_q4(const qp::Tensor &t, const std::vector<float> &Hf, uint8_t *q, uint
         for (int r = 0; r < nr; r++) {
           float *wr = w.data() + (size_t)r * n; const float s = sg[(size_t)r * G + g];
           const int lv = s == 0 ? 0 : std::max(-8, std::min(7, (int)std::lrintf(wr[p] / s)));
-          uint8_t &byte = q[(size_t)(r0 + r) * (n / 2) + 16 * g + (j & 15)];
+          uint8_t &byte = q[(size_t)(r0 + r) * (n / 2) + 16 * sb + (j & 15)];
           if (j < 16) byte = (uint8_t)((byte & 0xF0) | (lv + 8)); else byte = (uint8_t)((byte & 0x0F) | ((lv + 8) << 4));
           const float err = (wr[p] - lv * s) / upp;
           if (p + 1 < n) qp::axpy_f32(-err, u + p + 1, wr + p + 1, n - p - 1);
@@ -201,7 +202,7 @@ void gptq_q4(const qp::Tensor &t, const std::vector<float> &Hf, uint8_t *q, uint
 }  // namespace
 
 int main(int argc, char **argv) {
-  std::string in, out, type = "q4", calib; int calib_tokens = 4096; bool gptq = false, act_order = false, q4_head = false, q4m_last_half = false; std::set<std::string> keep;
+  std::string in, out, type = "q4", calib; int calib_tokens = 4096; bool gptq = false, act_order = false, q4_head = false, q4m_last_half = false; int group_all = 32, group_mlp = 0; std::set<std::string> keep;
   for (int i = 1; i < argc; i++) {
     std::string a = argv[i];
     if (a == "--type" && i + 1 < argc) type = argv[++i];
@@ -213,6 +214,8 @@ int main(int argc, char **argv) {
     else if (a == "--calib-tokens" && i + 1 < argc) calib_tokens = std::stoi(argv[++i]);
     else if (a == "--gptq") gptq = true;
     else if (a == "--q4-head") q4_head = true;
+    else if (a == "--group" && i + 1 < argc) group_all = std::stoi(argv[++i]);
+    else if (a == "--group-mlp" && i + 1 < argc) group_mlp = std::stoi(argv[++i]);
     else if (a == "--q4m-last-half") q4m_last_half = true;
     else if (a == "--act-order") act_order = true;
     else if (in.empty() && a[0] != '-') in = a;
@@ -220,6 +223,7 @@ int main(int argc, char **argv) {
     else { fputs(kUsage, stderr); return 2; }
   }
   if (in.empty() || out.empty() || (type != "q4" && type != "q4m" && type != "q8")) { fputs(kUsage, stderr); return 2; }
+  for (int g : {group_all, group_mlp}) if (g != 0 && g != 32 && g != 64 && g != 128) { fprintf(stderr, "--group / --group-mlp: 32, 64 or 128\n"); return 2; }
   if (q4m_last_half && type != "q4m") { fprintf(stderr, "--q4m-last-half requires --type q4m\n"); return 2; }
   if (!q4_head) for (const char *n : {"embed", "lm_head", "embed.weight", "lm_head.weight"}) keep.insert(n);
   try {
@@ -262,12 +266,14 @@ int main(int argc, char **argv) {
         n_q8 += t->numel(); tensors.push(ent); continue;
       }
       if (to_q4) {
-        const int G = cols / 32; std::string q((size_t)rows * cols / 2, '\0'), sc((size_t)rows * G * 2, '\0');
+        const bool is_mlp = name.find("w_gate") != std::string::npos || name.find("w_up") != std::string::npos || name.find("w_down") != std::string::npos || name.find("ffn.") != std::string::npos;
+        int gsz = is_mlp && group_mlp ? group_mlp : group_all; if (cols % gsz) gsz = 32;
+        const int G = cols / gsz; std::string q((size_t)rows * cols / 2, '\0'), sc((size_t)rows * G * 2, '\0');
         auto hit = cal.H.find(name);
         if (gptq && hit != cal.H.end()) {
-          gptq_q4(*t, *hit->second, (uint8_t *)&q[0], (uint16_t *)&sc[0], act_order);
+          gptq_q4(*t, *hit->second, (uint8_t *)&q[0], (uint16_t *)&sc[0], act_order, gsz);
           blobs.push_back({bid + ".q4", std::move(q)}); blobs.push_back({bid + ".scale", std::move(sc)});
-          ent.set("kind", "q4"); ent.set("blob", bid + ".q4"); ent.set("scale", bid + ".scale"); ent.set("group", 32); n_q4 += t->numel(); tensors.push(ent); continue;
+          ent.set("kind", "q4"); ent.set("blob", bid + ".q4"); ent.set("scale", bid + ".scale"); ent.set("group", gsz); n_q4 += t->numel(); tensors.push(ent); continue;
         }
         auto it = imp.find(name); std::vector<float> ones(cols, 1.f);
         const float *im = it != imp.end() && (int)it->second.size() == cols ? it->second.data() : ones.data();
@@ -275,11 +281,11 @@ int main(int argc, char **argv) {
           std::vector<float> row(cols);
           for (int r = a; r < b2; r++) {
             qp::row_f32(*t, r, row.data());
-            for (int g = 0; g < G; g++) q4_group(row.data() + 32 * g, im + 32 * g, (uint8_t *)&q[(size_t)r * cols / 2 + 16 * g], (uint16_t *)&sc[((size_t)r * G + g) * 2]);
+            for (int g = 0; g < G; g++) q4_group(row.data() + gsz * g, im + gsz * g, (uint8_t *)&q[(size_t)r * cols / 2 + (gsz / 2) * g], (uint16_t *)&sc[((size_t)r * G + g) * 2], gsz);
           }
         }, 4);
         blobs.push_back({bid + ".q4", std::move(q)}); blobs.push_back({bid + ".scale", std::move(sc)});
-        ent.set("kind", "q4"); ent.set("blob", bid + ".q4"); ent.set("scale", bid + ".scale"); ent.set("group", 32); n_q4 += t->numel();
+        ent.set("kind", "q4"); ent.set("blob", bid + ".q4"); ent.set("scale", bid + ".scale"); ent.set("group", gsz); n_q4 += t->numel();
       } else {   // q8 from float (same rule as container.quantize_q8)
         std::string q((size_t)rows * cols, '\0'), sc((size_t)rows * 4, '\0');
         qp::pool().parallel_for(rows, [&](int a, int b2) {

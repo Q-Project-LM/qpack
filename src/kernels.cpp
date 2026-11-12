@@ -41,7 +41,7 @@ static void rows_any(const Tensor &W, const float *x, const int16_t *xp, const f
     case Kind::F32: rows_f32(W.f32(), x, y, a, b, cols); break;
     case Kind::F16: rows_f16((const uint16_t *)W.data, x, y, a, b, cols); break;
     case Kind::Q8: rows_q8((const int8_t *)W.data, W.scale, xp, bp, y, a, b, cols); break;
-    case Kind::Q4: rows_q4((const uint8_t *)W.data, W.scale16, xp, bp, y, a, b, cols); break;
+    case Kind::Q4: rows_q4((const uint8_t *)W.data, W.scale16, xp, bp, y, a, b, cols, W.gshift()); break;
     default: throw std::runtime_error("matvec: unsupported tensor kind for " + W.name);
   }
 }
@@ -82,7 +82,7 @@ void matvec(const Tensor &W, const float *x, float *y, int rows, int cols) {
       quant_rows(x, 1, cols, cols, cols, nb, xq.data(), bs.data());
       const int16_t *xp = xq.data(); const float *bp = bs.data();
       if (W.kind == Kind::Q8) run([&](int a, int b) { rows_q8((const int8_t *)W.data, W.scale, xp, bp, y, a, b, cols); });
-      else run([&](int a, int b) { rows_q4((const uint8_t *)W.data, W.scale16, xp, bp, y, a, b, cols); });
+      else run([&](int a, int b) { rows_q4((const uint8_t *)W.data, W.scale16, xp, bp, y, a, b, cols, W.gshift()); });
       break;
     }
     default: throw std::runtime_error("matvec: unsupported tensor kind for " + W.name);
@@ -104,7 +104,7 @@ void matmul(const Tensor &W, const float *X, int B, int ldx, float *Y, int ldy, 
       for (int r = a; r < b2; r++)
         for (int b = 0; b < B; b += 4) {
           const int nt = std::min(4, B - b);
-          if (W.kind == Kind::Q4) row_q4_multi((const uint8_t *)W.data, W.scale16, xp + (size_t)b * ldq, ldq, bp + (size_t)b * nb, nb, Y + (size_t)b * ldy, ldy, r, nt, cols);
+          if (W.kind == Kind::Q4) row_q4_multi((const uint8_t *)W.data, W.scale16, xp + (size_t)b * ldq, ldq, bp + (size_t)b * nb, nb, Y + (size_t)b * ldy, ldy, r, nt, cols, W.gshift());
           else if (W.kind == Kind::Q8) row_q8_multi((const int8_t *)W.data, W.scale, xp + (size_t)b * ldq, ldq, bp + (size_t)b * nb, nb, Y + (size_t)b * ldy, ldy, r, nt, cols);
           else for (int j = b; j < b + nt; j++) rows_any(W, X + (size_t)j * ldx, xp + (size_t)j * ldq, bp + (size_t)j * nb, Y + (size_t)j * ldy, r, r + 1, cols);
         }
@@ -124,7 +124,7 @@ void matmul(const Tensor &W, const float *X, int B, int ldx, float *Y, int ldy, 
       quant_rows(X, B, ldx, cols, ldq, nb, xq.data(), bs.data());
       const int16_t *xp = xq.data(); const float *bp = bs.data();
       if (W.kind == Kind::Q8) run([&](int a, int b) { mm_q8((const int8_t *)W.data, W.scale, xp, bp, ldq, nb, B, Y, ldy, a, b, cols); });
-      else run([&](int a, int b) { mm_q4((const uint8_t *)W.data, W.scale16, xp, bp, ldq, nb, B, Y, ldy, a, b, cols); });
+      else run([&](int a, int b) { mm_q4((const uint8_t *)W.data, W.scale16, xp, bp, ldq, nb, B, Y, ldy, a, b, cols, W.gshift()); });
       break;
     }
     default: for (int i = 0; i < B; i++) matvec(W, X + (int64_t)i * ldx, Y + (int64_t)i * ldy, rows, cols);
@@ -138,9 +138,9 @@ void row_f32(const Tensor &W, int64_t r, float *out) {
     case Kind::F16: { const uint16_t *h = (const uint16_t *)W.data + r * n; for (int64_t i = 0; i < n; i++) out[i] = f16_to_f32(h[i]); break; }
     case Kind::Q8: { const int8_t *q = (const int8_t *)W.data + r * n; const float s = W.scale[r]; for (int64_t i = 0; i < n; i++) out[i] = q[i] * s; break; }
     case Kind::Q4: {
-      const uint8_t *q = (const uint8_t *)W.data + r * (n / 2); const uint16_t *s = W.scale16 + r * (n / 32);
+      const uint8_t *q = (const uint8_t *)W.data + r * (n / 2); const uint16_t *s = W.scale16 + r * (n / W.group);
       for (int64_t k = 0; k < n / 32; k++) {
-        const float sc = f16_to_f32(s[k]);
+        const float sc = f16_to_f32(s[(k * 32) / W.group]);
         for (int j = 0; j < 16; j++) { const uint8_t b = q[16 * k + j]; out[32 * k + j] = ((int)(b & 15) - 8) * sc; out[32 * k + j + 16] = ((int)(b >> 4) - 8) * sc; }
       }
       break;

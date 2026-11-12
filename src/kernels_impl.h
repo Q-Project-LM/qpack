@@ -24,11 +24,11 @@ void store_act_block(const int16_t *v, int n, int16_t *row, int c0, int cols);
 void rows_f32(const float *W, const float *x, float *y, int r0, int r1, int cols);
 void rows_f16(const uint16_t *W, const float *x, float *y, int r0, int r1, int cols);
 void rows_q8(const int8_t *Q, const float *scale, const int16_t *xq, const float *bs, float *y, int r0, int r1, int cols);
-void rows_q4(const uint8_t *Q, const uint16_t *S, const int16_t *xq, const float *bs, float *y, int r0, int r1, int cols);
+void rows_q4(const uint8_t *Q, const uint16_t *S, const int16_t *xq, const float *bs, float *y, int r0, int r1, int cols, int gs);
 void row_q8_multi(const int8_t *Q, const float *scale, const int16_t *XQ, int ldq, const float *BS, int nbs, float *Y, int ldy, int r, int nt, int cols);
-void row_q4_multi(const uint8_t *Q, const uint16_t *S, const int16_t *XQ, int ldq, const float *BS, int nbs, float *Y, int ldy, int r, int nt, int cols);
+void row_q4_multi(const uint8_t *Q, const uint16_t *S, const int16_t *XQ, int ldq, const float *BS, int nbs, float *Y, int ldy, int r, int nt, int cols, int gs);
 void mm_q8(const int8_t *Q, const float *scale, const int16_t *XQ, const float *BS, int ldq, int nb, int B, float *Y, int ldy, int r0, int r1, int cols);
-void mm_q4(const uint8_t *Q, const uint16_t *S, const int16_t *XQ, const float *BS, int ldq, int nb, int B, float *Y, int ldy, int r0, int r1, int cols);
+void mm_q4(const uint8_t *Q, const uint16_t *S, const int16_t *XQ, const float *BS, int ldq, int nb, int B, float *Y, int ldy, int r0, int r1, int cols, int gs);
 void mm_f32(const float *w, const float *X, int ldx, int B, float *Y, int ldy, int r0, int r1, int cols);
 void mm_f16(const uint16_t *w, const float *X, int ldx, int B, float *Y, int ldy, int r0, int r1, int cols);
 

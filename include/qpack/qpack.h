@@ -40,6 +40,7 @@ struct Tensor {
   const float *scale = nullptr;        // q8: one float32 per row
   const uint16_t *scale16 = nullptr;   // q4: one fp16 per group of `group` columns, row-major [rows, cols / group]
   int group = 0;                       // q4 group size (32): byte j of a group holds columns j (low nibble) and j + 16
+  int gshift() const { return group >= 128 ? 2 : group >= 64 ? 1 : 0; }   // log2(group / 32)
                                        // (high nibble), each stored as q + 8 with q in [-8, 7]
   std::vector<uint8_t> owned;          // storage for tensors converted at load time
   int64_t rows() const { return shape.empty() ? 0 : shape[0]; }

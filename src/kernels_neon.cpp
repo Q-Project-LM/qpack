@@ -118,15 +118,16 @@ void rows_q8(const int8_t *Q, const float *scale, const int16_t *xq, const float
     y[r] = acc * scale[r];
   }
 }
-void rows_q4(const uint8_t *Q, const uint16_t *S, const int16_t *xq, const float *bs, float *y, int r0, int r1, int cols) {
+void rows_q4(const uint8_t *Q, const uint16_t *S, const int16_t *xq, const float *bs, float *y, int r0, int r1, int cols, int gs) {
   const int G = cols / 32; const int8_t *xh = hi_plane(xq), *xl = xh + cols;
-  float bsx[1024], cmb[1024];   // activation block scale per group, and group scale x block scale (cols <= 32768)
+  float bsx[1024], cmb[1024], sf[1024];   // activation block scale per group, and group scale x block scale (cols <= 32768)
   for (int k = 0; k < G; k++) bsx[k] = bs[k >> 2];
   for (int r = r0; r < r1; r++) {
-    const uint8_t *q = Q + (int64_t)r * (cols / 2); const uint16_t *s = S + (int64_t)r * G;
+    const uint8_t *q = Q + (int64_t)r * (cols / 2); const uint16_t *s = S + (int64_t)r * (G >> gs);
+    for (int k = 0; k < G; k++) sf[k] = f16_to_f32(s[k >> gs]);
     int k = 0;
-    for (; k + 4 <= G; k += 4) vst1q_f32(cmb + k, vmulq_f32(ld_f16(s + k), vld1q_f32(bsx + k)));
-    for (; k < G; k++) cmb[k] = f16_to_f32(s[k]) * bsx[k];
+    for (; k + 4 <= G; k += 4) vst1q_f32(cmb + k, vmulq_f32(vld1q_f32(sf + k), vld1q_f32(bsx + k)));
+    for (; k < G; k++) cmb[k] = sf[k] * bsx[k];
     float32x4_t a0 = vdupq_n_f32(0), a1 = a0; k = 0;
     for (; k + 2 <= G; k += 2) {
       int8x16_t l0, h0, l1, h1; unpack_q4(q + 16 * k, l0, h0); unpack_q4(q + 16 * k + 16, l1, h1);
@@ -149,14 +150,15 @@ void row_q8_multi(const int8_t *Q, const float *scale, const int16_t *XQ, int ld
     Y[(int64_t)j * ldy + r] = acc[j] * scale[r];
   }
 }
-void row_q4_multi(const uint8_t *Q, const uint16_t *S, const int16_t *XQ, int ldq, const float *BS, int nbs, float *Y, int ldy, int r, int nt, int cols) {
-  const int G = cols / 32; const uint8_t *q = Q + (int64_t)r * (cols / 2); const uint16_t *s = S + (int64_t)r * G;
-  float cmb[4][1024];
+void row_q4_multi(const uint8_t *Q, const uint16_t *S, const int16_t *XQ, int ldq, const float *BS, int nbs, float *Y, int ldy, int r, int nt, int cols, int gs) {
+  const int G = cols / 32; const uint8_t *q = Q + (int64_t)r * (cols / 2); const uint16_t *s = S + (int64_t)r * (G >> gs);
+  float cmb[4][1024], sf[1024];
+  for (int k = 0; k < G; k++) sf[k] = f16_to_f32(s[k >> gs]);
   for (int j = 0; j < nt; j++) {
     const float *bs = BS + (int64_t)j * nbs; float bsx[1024]; for (int k = 0; k < G; k++) bsx[k] = bs[k >> 2];
     int k = 0;
-    for (; k + 4 <= G; k += 4) vst1q_f32(cmb[j] + k, vmulq_f32(ld_f16(s + k), vld1q_f32(bsx + k)));
-    for (; k < G; k++) cmb[j][k] = f16_to_f32(s[k]) * bsx[k];
+    for (; k + 4 <= G; k += 4) vst1q_f32(cmb[j] + k, vmulq_f32(vld1q_f32(sf + k), vld1q_f32(bsx + k)));
+    for (; k < G; k++) cmb[j][k] = sf[k] * bsx[k];
   }
   float32x4_t a0[4], a1[4]; for (int j = 0; j < nt; j++) a0[j] = a1[j] = vdupq_n_f32(0);
   int k = 0;
@@ -224,13 +226,13 @@ void mm_q8(const int8_t *Q, const float *scale, const int16_t *XQ, const float *
     for (; b < B; b++) rows_q8(Q, scale, XQ + (int64_t)b * ldq, BS + (int64_t)b * nb, Y + (int64_t)b * ldy, r, r + 1, cols);
   }
 }
-void mm_q4(const uint8_t *Q, const uint16_t *S, const int16_t *XQ, const float *BS, int ldq, int nb, int B, float *Y, int ldy, int r0, int r1, int cols) {
+void mm_q4(const uint8_t *Q, const uint16_t *S, const int16_t *XQ, const float *BS, int ldq, int nb, int B, float *Y, int ldy, int r0, int r1, int cols, int gs) {
   const int G = cols / 32;
   std::vector<float> bsx((size_t)B * G), cmb(4 * (size_t)G), sw(G);   // per vector: activation block scale per group
   for (int b = 0; b < B; b++) for (int k = 0; k < G; k++) bsx[(size_t)b * G + k] = BS[(size_t)b * nb + (k >> 2)];
   for (int r = r0; r < r1; r++) {
-    const uint8_t *q = Q + (int64_t)r * (cols / 2); const uint16_t *s = S + (int64_t)r * G;
-    for (int k = 0; k < G; k++) sw[k] = f16_to_f32(s[k]);
+    const uint8_t *q = Q + (int64_t)r * (cols / 2); const uint16_t *s = S + (int64_t)r * (G >> gs);
+    for (int k = 0; k < G; k++) sw[k] = f16_to_f32(s[k >> gs]);
     int b = 0;
     for (; b + 4 <= B; b += 4) {
       const int8_t *xh[4]; for (int j = 0; j < 4; j++) xh[j] = hi_plane(XQ + (int64_t)(b + j) * ldq);
@@ -243,7 +245,7 @@ void mm_q4(const uint8_t *Q, const uint16_t *S, const int16_t *XQ, const float *
       }
       for (int j = 0; j < 4; j++) Y[(int64_t)(b + j) * ldy + r] = vaddvq_f32(f[j]);
     }
-    for (; b < B; b++) rows_q4(Q, S, XQ + (int64_t)b * ldq, BS + (int64_t)b * nb, Y + (int64_t)b * ldy, r, r + 1, cols);
+    for (; b < B; b++) rows_q4(Q, S, XQ + (int64_t)b * ldq, BS + (int64_t)b * nb, Y + (int64_t)b * ldy, r, r + 1, cols, gs);
   }
 }
 
