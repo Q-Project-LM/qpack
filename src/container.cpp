@@ -7,8 +7,11 @@
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
+#include <thread>
+#include <cstdlib>
 
 #include "qpack/qpack.h"
+#include "qpack/rans.h"
 
 namespace qp {
 
@@ -23,7 +26,8 @@ Container::Container(const std::string &path) {
   if (size_ < 16) throw std::runtime_error("not a QPACK file: " + path);
   if (!memcmp(map_, "QPACK1\0\0", 8)) version_ = 1;
   else if (!memcmp(map_, "QPACK2\0\0", 8)) version_ = 2;
-  else throw std::runtime_error("not a QPACK1/QPACK2 file: " + path);
+  else if (!memcmp(map_, "QPACK3\0\0", 8)) version_ = 3;   // QPACK2 + rANS-coded blobs listed in manifest "encoded"
+  else throw std::runtime_error("not a QPACK1/QPACK2/QPACK3 file: " + path);
   uint32_t n; memcpy(&n, map_ + 8, 4);
   for (uint32_t i = 0; i < n; i++) {
     const uint8_t *b = map_ + 16 + 72 * (size_t)i;
@@ -33,6 +37,7 @@ Container::Container(const std::string &path) {
     toc_[name] = {off, len};
   }
   manifest_ = json("manifest.json"); config_ = json("config.json");
+  decode_blobs();
   for (auto &e : manifest_["tensors"].arr) {
     Tensor t; t.name = e["name"].as_str();
     for (auto &s : e["shape"].arr) t.shape.push_back(s.as_int());
@@ -63,10 +68,34 @@ Container::Container(const std::string &path) {
   }
 }
 
+// QPACK3: blobs listed in manifest "encoded" are rANS-coded; decode them once into 64-byte aligned heap buffers (in parallel)
+// so that blob() and everything built on it (tensors, kernels) sees plain QPACK2 data.
+void Container::decode_blobs() {
+  const Json &enc = manifest_["encoded"]; if (enc.arr.empty()) return;
+  std::vector<std::string> names; for (auto &e : enc.arr) names.push_back(e.as_str());
+  std::vector<AlignedBuf> bufs(names.size()); std::vector<std::string> errs(names.size());
+  for (size_t i = 0; i < names.size(); i++) {
+    size_t len; const uint8_t *p = blob(names[i], &len); size_t n = rans::raw_size(p, len);
+    bufs[i].len = n; bufs[i].p = (uint8_t *)aligned_alloc(64, (n + 63) / 64 * 64 + 64);
+    if (!bufs[i].p) throw std::runtime_error("out of memory decoding " + names[i]);
+  }
+  std::atomic<size_t> next{0}; unsigned nt = std::max(1u, std::min(16u, std::thread::hardware_concurrency()));
+  std::vector<std::thread> th;
+  for (unsigned t = 0; t < nt; t++) th.emplace_back([&] {
+    for (size_t i; (i = next++) < names.size();) {
+      try { size_t len; const uint8_t *p = blob(names[i], &len); rans::decode(p, len, bufs[i].p); } catch (std::exception &e) { errs[i] = e.what(); }
+    }
+  });
+  for (auto &t : th) t.join();
+  for (size_t i = 0; i < names.size(); i++) if (!errs[i].empty()) throw std::runtime_error("blob " + names[i] + ": " + errs[i]);
+  for (size_t i = 0; i < names.size(); i++) decoded_.emplace(names[i], std::move(bufs[i]));
+}
+
 Container::~Container() { if (map_ && map_ != MAP_FAILED) munmap(map_, size_); if (fd_ >= 0) close(fd_); }
 
 const uint8_t *Container::blob(const std::string &name, size_t *len) const {
   auto it = toc_.find(name); if (it == toc_.end()) throw std::runtime_error("missing blob " + name);
+  if (!decoded_.empty()) { auto d = decoded_.find(name); if (d != decoded_.end()) { if (len) *len = d->second.len; return d->second.p; } }
   if (len) *len = it->second.second;
   return map_ + it->second.first;
 }
@@ -75,9 +104,9 @@ std::vector<std::string> Container::blob_names() const {
   std::sort(v.begin(), v.end()); std::vector<std::string> o; for (auto &x : v) o.push_back(x.second); return o;
 }
 
-void write_container(const std::string &path, const std::vector<std::pair<std::string, std::string>> &blobs, bool qpack2) {
+void write_container(const std::string &path, const std::vector<std::pair<std::string, std::string>> &blobs, bool qpack2, const char *magic) {
   const uint64_t A = 64; uint64_t off = (16 + 72 * blobs.size() + A - 1) / A * A;
-  std::string head(qpack2 ? "QPACK2\0\0" : "QPACK1\0\0", 8); uint32_t n = (uint32_t)blobs.size(), pad = 0;
+  std::string head(magic ? magic : qpack2 ? "QPACK2\0\0" : "QPACK1\0\0", 8); uint32_t n = (uint32_t)blobs.size(), pad = 0;
   head.append((const char *)&n, 4); head.append((const char *)&pad, 4);
   std::vector<uint64_t> offs;
   for (auto &b : blobs) {

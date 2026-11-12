@@ -41,7 +41,7 @@ target_include_directories(qpack PUBLIC include)
 target_link_libraries(qpack PUBLIC Threads::Threads)
 
 if(QPACK_BUILD_TOOLS)
-foreach(tool qpack-cli qpack-server qpack-bench qpack-quantize qpack-perplexity)
+foreach(tool qpack-cli qpack-server qpack-bench qpack-quantize qpack-perplexity qpack-pack)
   add_executable(${tool} tools/${tool}.cpp)
   target_link_libraries(${tool} PRIVATE qpack)
 endforeach()
