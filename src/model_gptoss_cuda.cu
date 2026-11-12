@@ -634,15 +634,32 @@ class GptOssCuda : public Model {
     a.rowstart[nm] = tot;
     if (units <= 96) k_dense<3, 8><<<(tot + 7) / 8, 256, 0, s>>>(a); else k_dense<4, 8><<<(tot + 7) / 8, 256, 0, s>>>(a);
   }
+  // the kernels of the three expert kinds touch disjoint experts: capture them as parallel branches of the graph (fork / join by events)
+  template <class F> void kinds(cudaStream_t s, F f) {
+    int nk = has_[0] + has_[1] + has_[2];
+    if (!par_ || nk < 2) { for (int m = 0; m < 3; m++) if (has_[m]) f(m, s); return; }
+    CK(cudaEventRecord(evf_, s)); int used = 0;
+    for (int m = 0; m < 3; m++) if (has_[m]) {
+      cudaStream_t t = used == 0 ? s : s2_[used - 1];
+      if (used) CK(cudaStreamWaitEvent(t, evf_, 0));
+      f(m, t); used++;
+    }
+    for (int i = 0; i < used - 1; i++) { CK(cudaEventRecord(evj_[i], s2_[i])); CK(cudaStreamWaitEvent(s, evj_[i], 0)); }
+  }
   void launch_gateup(cudaStream_t s, const ExpD *tab, const float *bgu, const int4 *aA) {
     const dim3 g(ff_ / 32, NK);
-    if (has_[0]) k_gateup<0><<<g, GUT, 0, s>>>(tab, sel_, bgu, limit_, alpha_, ud_, ff_, aA, aA_s_, aA_sum_, aH_q_, aH_s_, aH_sum_);
-    if (has_[1]) k_gateup<1><<<g, GUT, 0, s>>>(tab, sel_, bgu, limit_, alpha_, ud_, ff_, aA, aA_s_, aA_sum_, aH_q_, aH_s_, aH_sum_);
-    if (has_[2]) k_gateup<2><<<g, GUT, 0, s>>>(tab, sel_, bgu, limit_, alpha_, ud_, ff_, aA, aA_s_, aA_sum_, aH_q_, aH_s_, aH_sum_);
+    kinds(s, [&](int m, cudaStream_t t) {
+      if (m == 0) k_gateup<0><<<g, GUT, 0, t>>>(tab, sel_, bgu, limit_, alpha_, ud_, ff_, aA, aA_s_, aA_sum_, aH_q_, aH_s_, aH_sum_);
+      else if (m == 1) k_gateup<1><<<g, GUT, 0, t>>>(tab, sel_, bgu, limit_, alpha_, ud_, ff_, aA, aA_s_, aA_sum_, aH_q_, aH_s_, aH_sum_);
+      else k_gateup<2><<<g, GUT, 0, t>>>(tab, sel_, bgu, limit_, alpha_, ud_, ff_, aA, aA_s_, aA_sum_, aH_q_, aH_s_, aH_sum_);
+    });
   }
+  cudaStream_t s2_[2] = {nullptr, nullptr}; cudaEvent_t evf_ = nullptr, evj_[2] = {nullptr, nullptr}; bool par_ = true;
   bool has_[3] = {false, false, false}, seen_[3] = {false, false, false};
   void build_graphs() {
     const float scl = 1.f / std::sqrt((float)hd_); cudaStream_t s = st_;
+    if (const char *e = getenv("QPACK_PAR")) par_ = atoi(e) != 0;
+    if (par_) { for (auto &x : s2_) CK(cudaStreamCreateWithFlags(&x, cudaStreamNonBlocking)); CK(cudaEventCreateWithFlags(&evf_, cudaEventDisableTiming)); for (auto &e : evj_) CK(cudaEventCreateWithFlags(&e, cudaEventDisableTiming)); }
     const int4 *aA = (const int4 *)aA_q_, *aO = (const int4 *)aO_q_, *aH = (const int4 *)aH_q_;
     CK(cudaStreamBeginCapture(s, cudaStreamCaptureModeGlobal));
     for (int l = 0; l < L_; l++) {
@@ -656,9 +673,11 @@ class GptOssCuda : public Model {
       k_norm<<<1, 1024, 0, s>>>(x_, ly.fn, nullptr, d_, eps_, aA_q_, aA_s_, aA_sum_, nullptr, ly.rw, ly.rb, E_, sel_, wt_);
       launch_gateup(s, ly.tab, ly.bgu, aA);
       { const dim3 g(d_ / 8, NK);
-        if (has_[0]) k_down<0><<<g, 256, 0, s>>>(ly.tab, sel_, wt_, ly.bd, uff_, d_, aH, aH_s_, aH_sum_, ye_);
-        if (has_[1]) k_down<1><<<g, 256, 0, s>>>(ly.tab, sel_, wt_, ly.bd, uff_, d_, aH, aH_s_, aH_sum_, ye_);
-        if (has_[2]) k_down<2><<<g, 256, 0, s>>>(ly.tab, sel_, wt_, ly.bd, uff_, d_, aH, aH_s_, aH_sum_, ye_); }
+        kinds(s, [&](int m, cudaStream_t t) {
+          if (m == 0) k_down<0><<<g, 256, 0, t>>>(ly.tab, sel_, wt_, ly.bd, uff_, d_, aH, aH_s_, aH_sum_, ye_);
+          else if (m == 1) k_down<1><<<g, 256, 0, t>>>(ly.tab, sel_, wt_, ly.bd, uff_, d_, aH, aH_s_, aH_sum_, ye_);
+          else k_down<2><<<g, 256, 0, t>>>(ly.tab, sel_, wt_, ly.bd, uff_, d_, aH, aH_s_, aH_sum_, ye_);
+        }); }
     }
     cudaGraph_t ga; CK(cudaStreamEndCapture(s, &ga)); CK(cudaGraphInstantiate(&ga_, ga, nullptr, nullptr, 0)); CK(cudaGraphDestroy(ga));
     for (int variant = 0; variant < 2; variant++) {

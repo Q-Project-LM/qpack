@@ -66,6 +66,8 @@ if(QPACK_CUDA)
     add_executable(${tool} tools/${tool}.cpp)
     target_link_libraries(${tool} PRIVATE qpack)
   endforeach()
+  add_executable(cuda_dump bench/cuda_dump.cpp)
+  target_link_libraries(cuda_dump PRIVATE qpack)
 endif()
 
 add_executable(test_tokenizer tests/test_tokenizer.cpp)
