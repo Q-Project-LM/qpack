@@ -207,4 +207,11 @@ q4m); batched prompt evaluation equals token-by-token decoding (max |Δlogit| 3e
 
 `runtime/` is the WebAssembly runtime used on the site: `nq_core.c` (the whole N-Q step in WASM SIMD, f32 / q8 / q4
 weights; N-Q-26M q4: 138 tok/s in node, logits within 4e-3 of the C++ engine),
-`llama_core.c`, `hf_tokenizer.js`, `qpack.js` (container reader), `nq_worker.js`.
+`llama_core.c` (Llama / Qwen2 step in WASM SIMD, f32 / q8 / q4) with `llama_worker.js`, `hf_tokenizer.js`, `qpack.js` (container reader), `nq_worker.js`.
+
+**gpt-oss on WebGPU**: `gptoss_webgpu.js` + `gptoss_worker.js` run gpt-oss containers (q8g attention / head, q1 experts with an optional
+second q1 plane, mxfp4 exact experts, `moe_exact`) with WGSL compute shaders: one command buffer per token, routing (top-4 + softmax) on
+the GPU, the f16 embedding kept in JS memory (one row uploaded per token). The file is streamed front to back straight into GPU
+buffers and written to OPFS at the same time, so a second visit reads it from disk. `gptoss-20b.c7-mixed.qpack` needs ~6.6 GB of GPU
+memory. Check: on a 3-layer cut of c7-mixed, top-5 logits match `bench/dump_logits` (22 tokens: 12.5524 vs 12.5524 for the top token).
+Not yet supported in the browser: per-expert second planes (`moe_r2`, the c8b file) and QPACK3.
